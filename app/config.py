@@ -1,6 +1,7 @@
 """Typed settings: config.yaml supplies tuning, .env supplies secrets and paths."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -151,10 +152,20 @@ class Settings(BaseSettings):
 
 
 def load_tuning(path: Path | None = None) -> TuningConfig:
-    path = path or CONFIG_PATH
+    """Load tuning from config.yaml, or from AUTODJ_CONFIG when it is set.
+
+    The override keeps the test suite independent of whatever is in the real
+    config.yaml -- notably the stem provider, since running Demucs inside unit
+    tests would add minutes per run.
+    """
+    if path is None:
+        override = os.environ.get("AUTODJ_CONFIG")
+        path = Path(override) if override else CONFIG_PATH
     if not path.exists():
         return TuningConfig()
-    raw = yaml.safe_load(path.read_text()) or {}
+    # UTF-8 explicitly: read_text() would use the system locale, so a config
+    # containing Hebrew would fail to load on a Hebrew Windows install.
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return TuningConfig.model_validate(raw)
 
 

@@ -60,7 +60,13 @@ class DemucsStemProvider(StemProvider):
             "-n", self.model, "-o", str(work), "--filename", "{stem}.{ext}",
             str(audio_path),
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        # Decode explicitly as UTF-8. text=True alone uses the system locale,
+        # which on a Hebrew Windows install is cp1255 and raises
+        # UnicodeDecodeError on demucs's progress output, killing the reader
+        # thread and losing the real error message.
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
         if proc.returncode != 0:
             raise RuntimeError(f"demucs failed: {proc.stderr[-2000:]}")
 

@@ -16,6 +16,19 @@ def isolated_data_dir(tmp_path_factory):
     os.environ["DATA_DIR"] = str(data)
     os.environ["MUSIC_DIR"] = str(FIXTURE_DIR)
 
+    # Pin the tuning tests run against, so they neither depend on nor are broken
+    # by whatever is in the real config.yaml. Chiefly this forces the fast stem
+    # provider: Demucs is ~1x realtime, which would add minutes to every run.
+    import yaml
+
+    from app.config import CONFIG_PATH
+
+    tuning = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    tuning.setdefault("analysis", {})["stem_provider"] = "hpss"
+    test_config = data / "test_config.yaml"
+    test_config.write_text(yaml.safe_dump(tuning), encoding="utf-8")
+    os.environ["AUTODJ_CONFIG"] = str(test_config)
+
     import app.config as config
     import app.db as db
 

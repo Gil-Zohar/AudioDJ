@@ -6,7 +6,9 @@ analysis:
   hop_length: 512
   beat_tracker: auto          # auto | librosa | madmom  (auto = madmom if importable, else librosa)
   beats_per_bar: 4
-  stem_provider: hpss         # demucs | hpss   (demucs is far better but needs torch + minutes/track)
+  # demucs is markedly better and roughly 1x realtime on 4 CPU threads;
+  # hpss is a fast DSP approximation for when you just need something now.
+  stem_provider: demucs       # demucs | hpss
   demucs_model: htdemucs
   min_section_bars: 4          # a section shorter than this is not a section
   min_section_seconds: 4.0     # absolute floor, used when the bar length is unknown

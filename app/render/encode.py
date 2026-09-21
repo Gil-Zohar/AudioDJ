@@ -38,7 +38,9 @@ def write_mp3(wav_path: Path, mp3_path: Path, bitrate: str = "320k") -> Path | N
     result = subprocess.run(
         [binary, "-y", "-loglevel", "error", "-i", str(wav_path),
          "-codec:a", "libmp3lame", "-b:a", bitrate, str(mp3_path)],
-        capture_output=True, text=True,
+        # Explicit UTF-8: the system locale codec (cp1255 on a Hebrew Windows
+        # install) cannot decode ffmpeg's output and would mask the real error.
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {result.stderr[-2000:]}")
