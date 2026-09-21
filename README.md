@@ -161,6 +161,46 @@ active — activate it, or run `python -m uvicorn app.main:app --reload`.)
 
 ---
 
+## Troubleshooting (Windows)
+
+| What you see | Why | Fix |
+|---|---|---|
+| `fatal: not a git repository` | the folder was downloaded as a ZIP, not cloned | `git clone` it properly — see below |
+| `'cp' is not recognized` / `'source' is not recognized` | Unix commands | use `copy`, and `.venv\Scripts\activate` |
+| `No suitable Python runtime found` | Python 3.11+ is not installed | `winget install Python.Python.3.12` |
+| `Package 'autodj' requires a different Python: 3.9.x not in '>=3.11'` | the venv was built with an old interpreter | delete `.venv`, recreate it with `py -3.12 -m venv .venv` |
+| `Directory cannot be installed in editable mode` | pip older than ~24.2 with no build backend declared | `python -m pip install --upgrade pip` (also fixed in this repo) |
+| `uvicorn is not recognized` | virtualenv not active | activate it, or use `python -m uvicorn app.main:app --reload` |
+
+### Starting clean on Windows
+
+```bat
+winget install Python.Python.3.12
+git clone https://github.com/Gil-Zohar/AudioDJ.git
+cd AudioDJ
+git checkout claude/autodj-mashup-mixer-62llrh
+
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+python -VV                        :: must say 3.11+ and 64 bit
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+
+copy .env.example .env            :: then edit MUSIC_DIR
+pytest -q
+python -m uvicorn app.main:app --reload
+```
+
+If a `.venv` already exists that was built with the wrong Python, remove it
+first (`rmdir /s /q .venv`) — recreating over the top does not change the
+interpreter it was built with.
+
+Python 3.9 and 3.10 will not work. The scientific stack has moved past them:
+current numpy, scipy and librosa all require 3.12+, and the versions this
+project pins need 3.11 as a floor.
+
+---
+
 ## Tuning
 
 Every weight and threshold lives in `config.yaml` — nothing is hardcoded.
