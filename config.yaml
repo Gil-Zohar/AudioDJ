@@ -1,0 +1,76 @@
+# AutoDJ tuning. Every weight and threshold the engine uses lives here.
+# Secrets and machine-specific paths belong in .env, not this file.
+
+analysis:
+  sample_rate: 22050          # analysis rate (render always runs at render.sample_rate)
+  hop_length: 512
+  beat_tracker: auto          # auto | librosa | madmom  (auto = madmom if importable, else librosa)
+  beats_per_bar: 4
+  stem_provider: hpss         # demucs | hpss   (demucs is far better but needs torch + minutes/track)
+  demucs_model: htdemucs
+  min_section_bars: 4          # a section shorter than this is not a section
+  min_section_seconds: 4.0     # absolute floor, used when the bar length is unknown
+  max_sections: 14
+  key_profile: temperley      # temperley | krumhansl
+
+matching:
+  tempo_tolerance: 0.08       # +/- 8% stretch considered acceptable
+  allow_half_double: true     # also try 2x and 0.5x tempo relationships
+  allow_three_two: false      # also try 3:2 / 2:3 (polyrhythmic, usually messy)
+  max_pitch_shift: 2          # semitones we may shift to fix a key clash
+  min_score: 0.45             # below this a pair is never used
+  top_n: 20
+  # Low key confidence shrinks the key term instead of trusting a bad detection.
+  # Critical for Mizrahi/maqam material where 12-TET key detection is unreliable.
+  key_confidence_floor: 0.35
+  weights:
+    tempo: 0.30
+    key: 0.25
+    chroma: 0.30
+    energy: 0.15
+  energy:
+    match_tolerance: 0.15     # |dE| under this counts as a clean energy match
+    build_target: 0.25        # ideal dE when the planner wants a deliberate build
+
+render:
+  sample_rate: 44100
+  channels: 2
+  bitrate: "320k"
+  transition_bars: 8
+  min_section_bars: 8
+  headroom_db: -1.0
+  mashup_vocal_gain_db: 1.5
+  mashup_instrumental_gain_db: -1.5
+
+transitions:
+  default: bass_swap
+  enabled: [bass_swap, filter_sweep, echo_out, reverb_tail]
+  filter_sweep:
+    start_hz: 20000
+    end_hz: 400
+  echo_out:
+    delay_beats: 0.75
+    feedback: 0.45
+    mix: 0.35
+  reverb_tail:
+    room_size: 0.8
+    wet: 0.4
+
+hype:
+  density: light              # off | light | heavy
+  lead_beats: 4               # how far before a drop a shout lands
+  gain_db: -6.0
+  tts_provider: none          # none | (pluggable)
+
+trends:
+  israel_weight: 0.7
+  global_weight: 0.3
+  cache_hours: 6
+  max_tracks: 200
+  providers: [lastfm, youtube, applemusic]
+  fuzzy_match_threshold: 82   # rapidfuzz score required to bind a trend entry to a local file
+
+live:
+  lookahead_seconds: 90
+  chunk_seconds: 2.0
+  trend_refresh_minutes: 30
