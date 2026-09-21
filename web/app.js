@@ -126,10 +126,10 @@ function drawEnergy(a) {
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-boot();
+boot().then(() => showView("create"));
 
 // ---------------------------------------------------------------- tabs ----
-const VIEWS = ["library", "mashup", "mixes"];
+const VIEWS = ["create", "library", "mashup", "trends", "mixes"];
 
 function showView(name) {
   document.querySelectorAll(".tab").forEach(t =>
@@ -138,7 +138,9 @@ function showView(name) {
   VIEWS.filter(v => v !== "library").forEach(v => {
     document.getElementById("view-" + v).hidden = v !== name;
   });
+  if (name === "create") renderCreate();
   if (name === "mashup") renderMashupForm();
+  if (name === "trends") renderTrends();
   if (name === "mixes") renderMixes();
 }
 
@@ -272,5 +274,162 @@ async function renderMixes() {
             <audio controls src="${m.audio_url}"></audio>
           </div>`).join("")
       : `<p class="muted">No mixes yet — build one from the Mashup tab.</p>`);
+  } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+// -------------------------------------------------------------- create ----
+function renderCreate() {
+  const el = document.getElementById("view-create");
+  if (el.dataset.ready) return;
+  el.dataset.ready = "1";
+  el.innerHTML = `
+    <h2>Create a mix</h2>
+    <p class="muted">Pulls the trending list, picks a set weighted by rank, orders it
+      for energy flow and renders it. Tracks that are trending but missing from your
+      library are listed below so you know what to add.</p>
+    <div class="row">
+      <div class="field"><label>Length</label>
+        <select id="c-length">
+          <option value="15">15 minutes</option>
+          <option value="30">30 minutes</option>
+          <option value="60">60 minutes</option>
+        </select></div>
+      <div class="field"><label>Israel / global</label>
+        <select id="c-ratio">
+          <option value="0.7" selected>70 / 30 (default)</option>
+          <option value="1.0">100% Israel</option>
+          <option value="0.5">50 / 50</option>
+          <option value="0.3">30 / 70</option>
+          <option value="0.0">100% global</option>
+        </select></div>
+      <div class="field"><label>Hype</label>
+        <select id="c-hype">
+          <option value="off">off</option>
+          <option value="light" selected>light</option>
+          <option value="heavy">heavy</option>
+        </select></div>
+      <div class="field"><label>Blend</label>
+        <select id="c-blend">
+          <option value="classic" selected>classic DJ</option>
+          <option value="mashup">mashup</option>
+        </select></div>
+      <button id="c-go">Create</button>
+      <button id="c-analyze" class="ghost"
+        title="Pre-separate stems so later mixes render fast">Analyze library</button>
+    </div>
+    <div id="c-out"></div>`;
+  document.getElementById("c-go").onclick = startCreate;
+  document.getElementById("c-analyze").onclick = startAnalyze;
+}
+
+function followJob(jobId, out, onDone) {
+  out.innerHTML = `<div class="progress"><i style="width:0%"></i></div>
+                   <div class="stage">starting…</div>
+                   <button id="c-cancel" class="ghost">Cancel</button>`;
+  const bar = out.querySelector(".progress > i");
+  const stage = out.querySelector(".stage");
+  document.getElementById("c-cancel").onclick = () =>
+    fetch("/api/jobs/" + jobId + "/cancel", { method: "POST" });
+
+  const es = new EventSource("/api/jobs/" + jobId + "/events");
+  es.onmessage = (ev) => {
+    let d;
+    try { d = JSON.parse(ev.data); } catch (err) { return; }
+    if (typeof d.progress === "number") bar.style.width = (d.progress * 100).toFixed(1) + "%";
+    if (d.stage) {
+      stage.textContent = d.stage +
+        (d.track ? " — " + d.track : "") +
+        (d.index ? " (" + d.index + "/" + d.total + ")" : "");
+    }
+    if (d.status && ["done", "failed", "cancelled"].includes(d.status)) {
+      es.close();
+      if (d.status === "done") onDone(d.result);
+      else out.innerHTML = `<p class="err">${esc(d.error || d.status)}</p>`;
+    }
+  };
+  es.onerror = () => { es.close(); stage.textContent = "connection lost"; };
+}
+
+async function startCreate() {
+  const out = document.getElementById("c-out");
+  const body = {
+    length_minutes: +document.getElementById("c-length").value,
+    israel_ratio: +document.getElementById("c-ratio").value,
+    hype: document.getElementById("c-hype").value,
+    blend: document.getElementById("c-blend").value,
+  };
+  try {
+    const job = await api("/api/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    followJob(job.job_id, out, renderCreateResult);
+  } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+async function startAnalyze() {
+  const out = document.getElementById("c-out");
+  try {
+    const job = await api("/api/library/analyze", { method: "POST" });
+    followJob(job.job_id, out, (r) => {
+      out.innerHTML = `<p>Analyzed ${r.analyzed} of ${r.total} tracks.` +
+        (r.failed.length ? ` <span class="err">${r.failed.length} failed.</span>` : "") +
+        `</p>`;
+    });
+  } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+function missingList(items) {
+  return `<div class="missing"><ul>${items.map(m => `<li>
+      <b>#${m.rank}</b> ${esc(m.artist)} — ${esc(m.title)}
+      <span class="pill ${m.region === "IL" ? "il" : ""}">${m.region}</span>
+      ${m.closest_local
+        ? `<span class="muted"> · closest: ${esc(m.closest_local)} (${m.closest_score})</span>`
+        : ""}
+    </li>`).join("")}</ul></div>`;
+}
+
+function renderCreateResult(r) {
+  const out = document.getElementById("c-out");
+  const t = r.tracklist;
+  const rows = (t.events || []).filter(e => e.kind === "track_in");
+  out.innerHTML = `
+    <h3>${esc(r.title)} — ${fmt(r.duration)}</h3>
+    <audio controls src="${r.audio_url}"></audio>
+    <p class="muted">${t.tracks.length} tracks · ${t.target_bpm} BPM · ${esc(t.mode)} ·
+      matched ${r.trends.resolved}/${r.trends.total} trending
+      (${(r.trends.coverage * 100).toFixed(0)}% coverage)</p>
+    <h3>Tracklist</h3>
+    <table class="tl">${rows.map(e => `<tr>
+      <td>${e.timecode}</td><td>${esc(e.label)}</td>
+      <td class="muted">${e.bpm || ""} ${e.key || ""}</td></tr>`).join("")}</table>
+    ${r.missing && r.missing.length ? `
+      <h3>Missing from your library <span class="pill warn">${r.missing.length}</span></h3>
+      <p class="muted">Trending but not found locally — your shopping list.</p>
+      ${missingList(r.missing)}` : ""}
+    <h3>Render log</h3>
+    <div class="reasons">${(r.log || []).map(esc).join("\n")}</div>`;
+}
+
+// ------------------------------------------------------------- trending ---
+async function renderTrends() {
+  const el = document.getElementById("view-trends");
+  el.innerHTML = `<p class="muted">fetching charts…</p>`;
+  try {
+    const r = await api("/api/trends");
+    const providers = r.providers
+      .map(p => p.name + ": " + (p.available ? "on" : "no key")).join(" · ");
+    el.innerHTML = `
+      <h2>Trending</h2>
+      <p class="muted">${esc(providers)} — matched ${r.counts.resolved} of ${r.total}
+        (${(r.coverage * 100).toFixed(0)}% coverage)</p>
+      <h3>In your library <span class="pill">${r.counts.resolved}</span></h3>
+      <div class="missing"><ul>${r.resolved.map(x => `<li>
+        <b>#${x.rank}</b> ${esc(x.artist)} — ${esc(x.title)}
+        <span class="pill ${x.region === "IL" ? "il" : ""}">${x.region}</span>
+        <span class="muted"> · ${esc(x.providers.join(", "))} · match ${x.match_score}</span>
+        </li>`).join("") || `<li class="muted">none matched yet</li>`}</ul></div>
+      <h3>Missing <span class="pill warn">${r.counts.missing}</span></h3>
+      ${missingList(r.missing.slice(0, 60))}`;
   } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }

@@ -75,3 +75,17 @@ audio { width: 100%; margin: 12px 0; }
   padding: 14px; margin-bottom: 12px; }
 .spin { display:inline-block; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.progress { height: 10px; background: #222833; border-radius: 5px; overflow: hidden; margin: 10px 0; }
+.progress > i { display: block; height: 100%; background: linear-gradient(90deg,#4fd1c5,#63b3ed);
+  transition: width .3s ease; }
+.stage { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
+.missing { max-height: 340px; overflow-y: auto; }
+.missing li { padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; list-style: none; }
+.missing ul { padding: 0; margin: 0; }
+.pill { font-size: 10px; padding: 1px 6px; border-radius: 10px; background: #22303f;
+  color: var(--accent); margin-left: 6px; }
+.pill.il { background: #2d3748; color: #90cdf4; }
+.pill.warn { background: #3b2b1e; color: var(--accent2); }
+.tl { font-size: 12px; }
+.tl td:first-child { font-family: ui-monospace, Consolas, monospace; color: var(--muted); width: 70px; }

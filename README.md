@@ -20,14 +20,14 @@ instead.
 
 ## Status
 
-Built in stages. **Stages 1 and 2 are complete**: analysis, stem separation,
-the matching engine and two-track mashup rendering.
+Built in stages. **Stages 1-3 are complete**: analysis, stem separation, the
+matching engine, mashup rendering, and the full Create flow with live trends.
 
 | Stage | What it adds | State |
 |---|---|---|
 | 1 | Analysis pipeline + stems | ✅ done |
 | 2 | Matching engine + 60s two-track mashup | ✅ done |
-| 3 | Full "Create" flow with trend providers | planned |
+| 3 | Full "Create" flow with trend providers | ✅ done |
 | 4 | Hype layer (shouts / airhorns / risers) | planned |
 | 5 | Live mode (continuous streamed mix) | planned |
 
@@ -228,6 +228,40 @@ trends:
 
 ---
 
+## Trends and the Create flow
+
+Providers supply **metadata only** — title, artist, rank. No audio is ever
+downloaded. Each is matched against your library by fuzzy title/artist, and
+whatever fails to match becomes the missing-tracks list, which doubles as a
+shopping list.
+
+| Provider | Key needed | What it is actually good for |
+|---|---|---|
+| **Apple Music** | none | **The best Israeli source.** Its `il` storefront returns genuine Israeli and Mizrahi chart entries, Hebrew intact. |
+| **Last.fm** | `LASTFM_API_KEY` | Its Israel chart reflects Last.fm scrobblers there, who skew international indie/rock — useful, but don't expect Mizrahi hits. |
+| **YouTube** | `YOUTUBE_API_KEY` | Catches viral tracks the audio charts miss; titles need heavy cleaning. |
+
+Entries are merged on a normalized `artist title` key, so the same song from two
+providers collapses into one row carrying both names. Scoring uses the best rank
+achieved (logarithmic, so #1 pulls away from #10), boosted when independent
+charts agree, then weighted by the Israel/global split.
+
+The set is **sampled** rather than taken top-N, so pressing Create twice gives
+you different mixes.
+
+**Provider failures are surfaced, never silent.** Apple's Israel feed is
+intermittently flaky — it times out or returns a truncated body, then works
+seconds later. Requests retry with backoff, and anything that still produces
+nothing appears as a warning in the UI. A silently empty Israeli chart would
+make the app quietly useless for its main purpose.
+
+### Pre-analysing your library
+
+Demucs runs at roughly **1x realtime** (measured: 66s for 60s of audio on 4 CPU
+threads), so a first mix that has to separate eight unseen tracks will sit there
+for a while. Press **Analyze library** once and it caches everything; later mixes
+then render in seconds. Results are keyed per file, so you pay it once.
+
 ## How matching works
 
 Every decision is a weighted sum of four normalized terms, and every pair the
@@ -337,6 +371,8 @@ accuracy on those fixtures:
 | Section boundaries | **4/5** within 3s, snapped to within 0.05s of the true bar |
 | Mashup tempo | rendered audio lands within **0.32%** of the target BPM |
 | Mashup alignment | **0.56%** beat jitter — the two layers are locked |
+| Create flow | 168 trending merged, 8-track 14:18 mix rendered in **72s**, no clipping, zero dead air |
+| Hebrew | survives tags, normalization, fuzzy matching, SSE and tracklist JSON |
 
 The 175 BPM fixture is deliberately detected at half time (~87.5) — the standard
 octave error. That is pinned by a test rather than "fixed", because the tempo
@@ -356,7 +392,9 @@ app/
   analysis/         beats, key, segments, energy, stems, pipeline
   matching/         compat (pure), scorer (pure), planner
   render/           engine, timeline, transitions, mashup, encode
-  trends/           (stage 3) Last.fm / YouTube / Apple providers
+  trends/           providers, weighted merge, fuzzy resolver
+  jobs.py           background jobs + SSE progress
+  create.py         the Create flow end to end
   live/             (stage 5) look-ahead renderer + MP3 broadcaster
 web/                plain HTML/JS front end, no build step
 tests/              unit tests + synthetic audio fixtures
@@ -379,3 +417,8 @@ samples/            your hype one-shots (gitignored)
 | `POST` | `/api/mashup` | render a mashup (`track_a`, `track_b`, `bars`, `transition`) |
 | `GET` | `/api/mixes` | rendered mixes |
 | `GET` | `/api/mixes/{id}/audio` | stream a mix |
+| `GET` | `/api/trends` | merged charts + what matches your library |
+| `POST` | `/api/create` | start a Create job (returns a job id) |
+| `POST` | `/api/library/analyze` | pre-analyse + pre-separate the whole library |
+| `GET` | `/api/jobs/{id}/events` | SSE progress stream |
+| `POST` | `/api/jobs/{id}/cancel` | cancel a running job |

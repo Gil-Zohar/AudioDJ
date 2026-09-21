@@ -12,13 +12,17 @@
   <h1>Auto<span>DJ</span></h1>
   <span class="muted" id="status">loading…</span>
   <nav class="tabs">
-    <button class="tab active" data-view="library">Library</button>
+    <button class="tab active" data-view="create">Create</button>
+    <button class="tab" data-view="library">Library</button>
     <button class="tab" data-view="mashup">Mashup</button>
-    <button class="tab" data-view="mixes">Mixes</button>
+    <button class="tab" data-view="trends">Trending</button>
+    <button class="tab" data-view="mixes">History</button>
   </nav>
-  <span class="muted" style="margin-left:auto">Stage 2 — matching &amp; mashup</span>
+  <span class="muted" style="margin-left:auto">Stage 3 — trends &amp; Create</span>
 </header>
-<main id="view-library">
+<section id="view-create" class="panel"></section>
+<section id="view-trends" class="panel" hidden></section>
+<main id="view-library" style="display:none">
   <div id="list"><div class="muted" style="padding:14px">scanning…</div></div>
   <div id="detail"><p class="muted">Pick a track on the left.</p></div>
 </main>

@@ -10,12 +10,15 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.analysis.key import key_name
+from app.create import CreateOptions, analyze_library, create_mix
+from app.jobs import get_registry, sse_stream
+from app.trends.resolver import fetch_and_resolve
 from app.matching.scorer import rank_pairs
 from app.render.mashup import build_mashup
 from app.analysis.pipeline import (
@@ -293,6 +296,98 @@ def mix_detail(mix_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"unknown mix: {mix_id}")
     mix["audio_url"] = f"/api/mixes/{mix_id}/audio"
     return mix
+
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: trends, the Create flow, jobs and history
+# ---------------------------------------------------------------------------
+
+@app.get("/api/trends")
+async def trends(refresh: bool = Query(False)) -> dict:
+    """Merged trending list, with each entry matched against your library."""
+    source = get_source()
+    await run_in_threadpool(source.scan, refresh)
+    merged, resolution = await run_in_threadpool(fetch_and_resolve, source)
+
+    # resolution carries per-provider counts and errors, so a provider that
+    # silently produced nothing is visible instead of just missing.
+    return {
+        "total": len(merged),
+        "trending": [
+            {"rank": m.rank, "title": m.title, "artist": m.artist,
+             "region": m.region, "providers": m.providers,
+             "score": round(m.score, 4), "artwork": m.artwork}
+            for m in merged[:100]
+        ],
+        **resolution.to_dict(),
+    }
+
+
+@app.post("/api/create")
+def create(options: CreateOptions) -> dict:
+    """Start a Create job. Returns immediately; follow progress over SSE."""
+    registry = get_registry()
+    job = registry.create("create")
+
+    def target(job, progress):
+        return create_mix(options, progress, get_source())
+
+    registry.run(job, target)
+    return {"job_id": job.id, "events_url": f"/api/jobs/{job.id}/events", **job.to_dict()}
+
+
+@app.post("/api/library/analyze")
+def analyze_library_endpoint(with_stems: bool = Query(True)) -> dict:
+    """Pre-analyse the whole library so later mixes render without waiting."""
+    registry = get_registry()
+    job = registry.create("analyze_library")
+
+    def target(job, progress):
+        return analyze_library(progress, with_stems, get_source())
+
+    registry.run(job, target)
+    return {"job_id": job.id, "events_url": f"/api/jobs/{job.id}/events", **job.to_dict()}
+
+
+@app.get("/api/jobs")
+def list_jobs() -> dict:
+    return {"jobs": [j.to_dict() for j in get_registry().list()]}
+
+
+@app.get("/api/jobs/{job_id}")
+def job_detail(job_id: str) -> dict:
+    job = get_registry().get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+    return job.to_dict()
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    if not get_registry().cancel(job_id):
+        raise HTTPException(status_code=409, detail="job is not running")
+    return {"ok": True}
+
+
+@app.get("/api/jobs/{job_id}/events")
+def job_events(job_id: str) -> StreamingResponse:
+    """Server-Sent Events stream of a job's progress."""
+    registry = get_registry()
+    job = registry.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+
+    return StreamingResponse(
+        sse_stream(job, registry),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Stops nginx and friends buffering the stream into uselessness.
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 WEB_DIR = PROJECT_ROOT / "web"
