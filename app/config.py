@@ -67,6 +67,10 @@ class RenderConfig(BaseModel):
     time_stretcher: Literal["auto", "rubberband", "librosa"] = "auto"
     channels: int = 2
     bitrate: str = "320k"
+    # How far a track may be stretched to join the set's tempo. Looser than the
+    # per-transition tolerance, because a whole set shares one clock, but past
+    # roughly this the audio audibly degrades.
+    max_stretch: float = 0.12
     transition_bars: int = 8
     min_section_bars: int = 8
     headroom_db: float = -1.0

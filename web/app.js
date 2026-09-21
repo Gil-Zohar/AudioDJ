@@ -288,6 +288,11 @@ function renderCreate() {
       for energy flow and renders it. Tracks that are trending but missing from your
       library are listed below so you know what to add.</p>
     <div class="row">
+      <div class="field"><label>Tracks from</label>
+        <select id="c-source">
+          <option value="trends" selected>trending charts</option>
+          <option value="library">my library</option>
+        </select></div>
       <div class="field"><label>Length</label>
         <select id="c-length">
           <option value="15">15 minutes</option>
@@ -316,10 +321,13 @@ function renderCreate() {
       <button id="c-go">Create</button>
       <button id="c-analyze" class="ghost"
         title="Pre-separate stems so later mixes render fast">Analyze library</button>
+      <button id="c-fetch" class="ghost"
+        title="Download Creative Commons music into MUSIC_DIR">Get free music</button>
     </div>
     <div id="c-out"></div>`;
   document.getElementById("c-go").onclick = startCreate;
   document.getElementById("c-analyze").onclick = startAnalyze;
+  document.getElementById("c-fetch").onclick = startFetchMusic;
 }
 
 function followJob(jobId, out, onDone) {
@@ -353,6 +361,7 @@ function followJob(jobId, out, onDone) {
 async function startCreate() {
   const out = document.getElementById("c-out");
   const body = {
+    source: document.getElementById("c-source").value,
     length_minutes: +document.getElementById("c-length").value,
     israel_ratio: +document.getElementById("c-ratio").value,
     hype: document.getElementById("c-hype").value,
@@ -409,6 +418,23 @@ function renderCreateResult(r) {
       ${missingList(r.missing)}` : ""}
     <h3>Render log</h3>
     <div class="reasons">${(r.log || []).map(esc).join("\n")}</div>`;
+}
+
+async function startFetchMusic() {
+  const out = document.getElementById("c-out");
+  if (!confirm("Download 15 Creative Commons tracks from the Internet Archive " +
+               "into MUSIC_DIR? Licences are recorded in LICENCES.txt.")) return;
+  try {
+    const job = await api("/api/library/fetch-cc?count=15", { method: "POST" });
+    followJob(job.job_id, out, (r) => {
+      out.innerHTML = `<p>Downloaded ${r.downloaded} tracks into
+        <code>${esc(r.directory)}</code>.</p>
+        <div class="missing"><ul>${r.tracks.map(t => `<li>${esc(t.artist)} — ${esc(t.title)}
+          <span class="muted"> · ${esc(t.license)}</span></li>`).join("")}</ul></div>
+        <p class="muted">Set MUSIC_DIR to that folder in .env and restart, then
+          press Create with "my library" selected.</p>`;
+    });
+  } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 
 // ------------------------------------------------------------- trending ---

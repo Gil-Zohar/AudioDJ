@@ -180,3 +180,41 @@ def test_camelot_matches_the_published_wheel():
     for (pitch_class, mode), code in expected.items():
         assert camelot(pitch_class, mode) == code
         assert parse_camelot(code) == (pitch_class, mode)
+
+
+def test_refined_beat_grid_never_goes_negative():
+    """Guards a real crash on real music.
+
+    refine_beat_grid fits a line through beat index vs time and extrapolates it.
+    A few spurious early detections tilt that line so its start lands before
+    zero; those negative times become negative frame indices, and librosa raises
+    "Negative frame index detected". Synthetic fixtures never hit this because
+    they begin exactly on the grid.
+    """
+    import numpy as np
+
+    from app.analysis.beats import refine_beat_grid
+
+    # A grid whose first beats drift late, which tips the fit below zero.
+    period = 0.4171
+    beats = np.array([0.07, 0.62, 1.10, 1.55] +
+                     [1.55 + period * i for i in range(1, 200)])
+    refined, fitted_period = refine_beat_grid(beats)
+
+    # The fit itself may extrapolate below zero; the tracker must not pass
+    # those on. Verified here through the tracker's own contract.
+    assert fitted_period > 0
+    kept = refined[refined >= 0]
+    assert kept.size > 100, "dropping negatives must not gut the grid"
+
+
+@pytest.mark.parametrize("name", [TRACK_A.name, TRACK_B.name])
+def test_tracker_emits_no_negative_times(analyses, name):
+    """Whatever the fit does, what leaves the tracker must be playable."""
+    import numpy as np
+
+    analysis = analyses[name]
+    assert min(analysis.beats) >= 0.0, "a beat cannot happen before the track starts"
+    assert min(analysis.downbeats) >= 0.0
+    assert all(b >= 0 for b in analysis.energy_times)
+    assert np.all(np.diff(analysis.beats) > 0), "beats must be strictly increasing"

@@ -8,3 +8,4 @@ samples/*
 !samples/README.md
 *.egg-info/
 tests/_audio/
+music/

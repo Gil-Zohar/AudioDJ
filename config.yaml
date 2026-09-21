@@ -41,6 +41,7 @@ render:
   time_stretcher: auto
   channels: 2
   bitrate: "320k"
+  max_stretch: 0.12           # drop a track from a set if it needs more than this
   transition_bars: 8
   min_section_bars: 8
   headroom_db: -1.0

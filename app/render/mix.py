@@ -18,6 +18,7 @@ import numpy as np
 
 from app.analysis.pipeline import analyze_track, separate_stems
 from app.config import TuningConfig, get_settings, get_tuning
+from app.matching.compat import choose_set_tempo, stretch_to_target
 from app.matching.planner import SetPlan, plan_set
 from app.models import Analysis, TrackMeta
 from app.render.encode import export_mix
@@ -109,8 +110,13 @@ def build_mix(
     progress: ProgressFn = _noop,
     out_name: Optional[str] = None,
     hype: Optional[str] = None,
+    max_tracks: Optional[int] = None,
 ) -> MixResult:
-    """Order the tracks for energy flow, then render the set."""
+    """Order the tracks for energy flow, then render the set.
+
+    `max_tracks` caps the set after unmatchable tempos are dropped, so callers
+    can over-supply candidates and still get the size they asked for.
+    """
     tuning = tuning or get_tuning()
     settings = get_settings()
     render_config = tuning.render
@@ -128,12 +134,49 @@ def build_mix(
         analyses[track.id] = analyze_track(track, tuning)
 
     by_id = {t.id: t for t in tracks}
-    plan = plan_set(list(analyses.values()), tuning.matching)
+
+    # Pick a tempo the most tracks can actually reach, then drop the ones that
+    # still cannot. Stretching everything to the raw median produced 35%
+    # stretches on a set spanning 86-182 BPM, which destroys the audio; a track
+    # that cannot be beat-matched is better left out than mangled.
+    target_bpm = choose_set_tempo([a.bpm for a in analyses.values()],
+                                  tuning.matching.tempo_tolerance)
+    max_stretch = render_config.max_stretch
+
+    keepable, dropped = [], []
+    for analysis in analyses.values():
+        _, deviation = stretch_to_target(analysis.bpm, target_bpm)
+        (keepable if deviation <= max_stretch else dropped).append((analysis, deviation))
+
+    for analysis, deviation in dropped:
+        log.append(
+            f"dropped {by_id[analysis.track_id].title}: {analysis.bpm:.1f} BPM needs "
+            f"{deviation * 100:.0f}% stretch to reach {target_bpm:.1f} BPM "
+            f"(limit {max_stretch * 100:.0f}%)"
+        )
+
+    if len(keepable) < 2:
+        raise ValueError(
+            f"only {len(keepable)} of {len(analyses)} tracks can be beat-matched to a "
+            f"common tempo near {target_bpm:.0f} BPM. Their tempos are too spread out "
+            f"({', '.join(f'{a.bpm:.0f}' for a in analyses.values())}). Add more tracks "
+            "at similar tempos, or raise render.max_stretch in config.yaml."
+        )
+
+    if max_tracks:
+        # Closest to the target first: least stretching, best sounding.
+        keepable.sort(key=lambda pair: pair[1])
+        keepable = keepable[:max_tracks]
+
+    kept_analyses = [a for a, _ in keepable]
+    plan = plan_set(kept_analyses, tuning.matching)
     log.extend(plan.log)
 
     ordered = [by_id[a.track_id] for a in plan.order]
-    target_bpm = float(np.median([analyses[t.id].bpm for t in ordered]))
-    log.append(f"set tempo {target_bpm:.1f} BPM across {len(ordered)} tracks, blend={blend}")
+    log.append(
+        f"set tempo {target_bpm:.1f} BPM across {len(ordered)} tracks "
+        f"({len(dropped)} dropped as unmatchable), blend={blend}"
+    )
 
     transition_bars = render_config.transition_bars
     bars_each = _segment_bars(target_minutes, len(ordered), target_bpm, transition_bars)
@@ -166,7 +209,7 @@ def build_mix(
             (ordered[index - 1].id, track.id)) if index else None
         start = planned.pair.section_b.start if planned else _default_start(analysis)
 
-        rate = target_bpm / max(analysis.bpm, 1e-6)
+        rate, _ = stretch_to_target(analysis.bpm, target_bpm)
         semitones = float(planned.pair.breakdown.key.semitones) if planned else 0.0
 
         audio = _take(track.path, analysis, start, bars_each,
@@ -209,11 +252,12 @@ def build_mix(
             if blend == "mashup" and index < len(ordered) and track.id in stems:
                 previous = ordered[index - 1]
                 if previous.id in stems:
+                    previous_rate, _ = stretch_to_target(
+                        analyses[previous.id].bpm, target_bpm)
                     bed = _instrumental(
                         stems[previous.id], analyses[previous.id],
                         start, min(bars_each, transition_bars * 2), sample_rate,
-                        target_bpm / max(analyses[previous.id].bpm, 1e-6),
-                        0.0, stretcher,
+                        previous_rate, 0.0, stretcher,
                     )
                     if bed.size:
                         timeline.add(Clip(

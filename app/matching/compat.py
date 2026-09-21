@@ -94,6 +94,84 @@ def tempo_compat(
     return best
 
 
+# A set has to share one clock. These fold tempos onto a common metrical level
+# and pick a target the most tracks can actually reach.
+CANONICAL_LOW = 82.0
+CANONICAL_HIGH = 164.0
+
+
+def fold_tempo(bpm: float, low: float = CANONICAL_LOW,
+               high: float = CANONICAL_HIGH) -> tuple[float, float]:
+    """Halve or double a tempo into one canonical octave.
+
+    174 BPM drum & bass and 87 BPM hip-hop share a pulse; comparing the raw
+    numbers says they are 2:1 apart and unmixable. Returns (folded, ratio),
+    where ratio is what the original was multiplied by.
+    """
+    if bpm <= 0:
+        return 0.0, 1.0
+    folded, ratio = float(bpm), 1.0
+    for _ in range(4):
+        if folded < low:
+            folded, ratio = folded * 2.0, ratio * 2.0
+        elif folded > high:
+            folded, ratio = folded / 2.0, ratio / 2.0
+        else:
+            break
+    return folded, ratio
+
+
+def choose_set_tempo(bpms: list[float], tolerance: float = 0.08) -> float:
+    """Pick the tempo the largest number of tracks can reach within tolerance.
+
+    The median of raw BPMs is the obvious choice and a bad one: a set spanning
+    86 to 182 BPM gets a median nothing can reach, and every track ends up
+    stretched 30% into mush. Folding first, then taking the densest cluster,
+    finds a tempo that actually works for most of the set.
+    """
+    folded = [fold_tempo(b)[0] for b in bpms if b > 0]
+    if not folded:
+        return 0.0
+
+    best_tempo, best_count = folded[0], -1
+    for candidate in folded:
+        count = sum(1 for f in folded if abs(f - candidate) / candidate <= tolerance)
+        if count > best_count:
+            best_tempo, best_count = candidate, count
+
+    # Centre on the cluster rather than on whichever member was tested first.
+    cluster = [f for f in folded if abs(f - best_tempo) / best_tempo <= tolerance]
+    return float(np.median(cluster)) if cluster else float(best_tempo)
+
+
+def stretch_to_target(bpm: float, target_bpm: float) -> tuple[float, float]:
+    """(stretch rate, deviation) to play `bpm` at `target_bpm`.
+
+    Searches metrical levels and keeps whichever needs least stretching: a
+    182 BPM track joining a 95 BPM set is a 4% nudge at half time, not an
+    impossible 48% one. Folding blindly into a fixed window is not enough --
+    it can pick a worse ratio than leaving the tempo alone.
+
+    Deviation is symmetric, so halving and doubling the speed are judged as
+    equally severe. Using |rate - 1| would rate a 2x speed-up as twice as bad
+    as a 2x slow-down, which is not how it sounds.
+    """
+    if bpm <= 0 or target_bpm <= 0:
+        return 1.0, 1.0
+
+    best_rate, best_deviation = 1.0, float("inf")
+    for ratio in (0.25, 0.5, 1.0, 2.0, 4.0):
+        effective = bpm * ratio
+        if effective <= 0:
+            continue
+        rate = target_bpm / effective
+        deviation = max(rate, 1.0 / rate) - 1.0
+        if deviation < best_deviation:
+            best_rate, best_deviation = rate, deviation
+
+    return best_rate, best_deviation
+
+
 def camelot_distance(code_a: str, code_b: str) -> int:
     """Steps between two Camelot codes under standard harmonic-mixing rules.
 

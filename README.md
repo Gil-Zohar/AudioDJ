@@ -255,6 +255,45 @@ seconds later. Requests retry with backoff, and anything that still produces
 nothing appears as a warning in the UI. A silently empty Israeli chart would
 make the app quietly useless for its main purpose.
 
+### Building from your own library
+
+Trend matching only pays off once you own what is charting. Set **Tracks from**
+to *my library* and Create builds from whatever you have, ordered for energy
+flow, ignoring the charts entirely. That stays useful afterwards for building a
+set out of a crate you have curated yourself.
+
+### Getting music to test with
+
+No library yet? This pulls Creative Commons tracks from the Internet Archive:
+
+```bash
+python -m app.tools.fetch_cc --out ./music --count 15
+```
+
+or press **Get free music** in the Create tab. Each file's licence and source
+page is recorded in `LICENCES.txt` beside the audio. This is the only place
+AutoDJ downloads audio, and deliberately so: the Archive publishes these files
+for free redistribution. Commercial music still has to come from your own
+library.
+
+For the real thing — a mix of what is actually charting in Israel — you need to
+own those tracks. The **Missing** list in the Trending tab is your shopping
+list, ranked. Apple's iTunes Store, Amazon and Bandcamp all sell DRM-free files.
+
+### One clock for the whole set
+
+A set has to share a tempo, so tracks that cannot be beat-matched to it are
+**dropped and reported**, not stretched into mush:
+
+```
+dropped Muhammad Ali: 182.0 BPM needs 36% stretch to reach 123.5 BPM (limit 12%)
+```
+
+The target is the densest tempo cluster after folding half/double time, not the
+raw median — a set spanning 86 to 182 BPM has a median nothing can reach. Create
+over-supplies candidates so dropping still leaves a full-length mix. Raise
+`render.max_stretch` if you would rather keep everything.
+
 ### Pre-analysing your library
 
 Demucs runs at roughly **1x realtime** (measured: 66s for 60s of audio on 4 CPU
@@ -373,6 +412,7 @@ accuracy on those fixtures:
 | Mashup alignment | **0.56%** beat jitter — the two layers are locked |
 | Create flow | 168 trending merged, 8-track 14:18 mix rendered in **72s**, no clipping, zero dead air |
 | Hebrew | survives tags, normalization, fuzzy matching, SSE and tracklist JSON |
+| Library mode | 13:43 mix from 8 real CC tracks, worst stretch **8.3%**, rendered audio within **0.4%** of its target tempo |
 
 The 175 BPM fixture is deliberately detected at half time (~87.5) — the standard
 octave error. That is pinned by a test rather than "fixed", because the tempo
@@ -392,6 +432,7 @@ app/
   analysis/         beats, key, segments, energy, stems, pipeline
   matching/         compat (pure), scorer (pure), planner
   render/           engine, timeline, transitions, mashup, encode
+  tools/fetch_cc.py Creative Commons downloader (Internet Archive)
   trends/           providers, weighted merge, fuzzy resolver
   jobs.py           background jobs + SSE progress
   create.py         the Create flow end to end
@@ -420,5 +461,6 @@ samples/            your hype one-shots (gitignored)
 | `GET` | `/api/trends` | merged charts + what matches your library |
 | `POST` | `/api/create` | start a Create job (returns a job id) |
 | `POST` | `/api/library/analyze` | pre-analyse + pre-separate the whole library |
+| `POST` | `/api/library/fetch-cc` | download Creative Commons music into MUSIC_DIR |
 | `GET` | `/api/jobs/{id}/events` | SSE progress stream |
 | `POST` | `/api/jobs/{id}/cancel` | cancel a running job |

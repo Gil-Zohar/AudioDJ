@@ -29,6 +29,11 @@ LENGTH_MINUTES = {"15": 15.0, "30": 30.0, "60": 60.0}
 class CreateOptions(BaseModel):
     """Everything the Create button can be configured with."""
 
+    #: Where the track list comes from. "trends" is the headline feature, but it
+    #: only works if you own what is charting; "library" builds from whatever you
+    #: have, which is the difference between a usable app and an empty one when
+    #: chart coverage is low.
+    source: Literal["trends", "library"] = "trends"
     length_minutes: float = Field(default=15.0, ge=1.0, le=180.0)
     israel_ratio: float = Field(default=0.7, ge=0.0, le=1.0)
     hype: Literal["off", "light", "heavy"] = "light"
@@ -71,6 +76,11 @@ def create_mix(
             "Point it at your music library in .env."
         )
 
+    wanted_count = track_count_for(options.length_minutes, options.track_count)
+
+    if options.source == "library":
+        return _create_from_library(options, progress, source, library, wanted_count)
+
     progress("fetching trends", 0.05)
     merged, resolution = fetch_and_resolve(
         source,
@@ -89,7 +99,7 @@ def create_mix(
             "normally work."
         )
 
-    wanted = track_count_for(options.length_minutes, options.track_count)
+    wanted = wanted_count
     available = [r for r in resolution.resolved]
 
     progress(
@@ -101,14 +111,18 @@ def create_mix(
         raise ValueError(
             f"only {len(available)} trending track(s) matched your library, and a mix "
             f"needs at least 2. {len(resolution.missing)} trending tracks are missing "
-            "locally - see the missing list. Add some of them to MUSIC_DIR, or check "
-            "your files are tagged with the right artist and title."
+            "locally - see the missing list, which is effectively your shopping list. "
+            "Either add some of them to MUSIC_DIR and check your files are tagged with "
+            "the right artist and title, or switch the source to 'my library' to build "
+            f"a mix from the {len(library)} tracks you already have."
         )
 
     # Sample rather than take the top N, so pressing Create twice differs.
     seed = options.seed if options.seed is not None else int(time.time())
+    # Over-supply for the same reason as library mode: the renderer drops
+    # tracks it cannot beat-match to the set's tempo.
     chosen_trends = weighted_sample(
-        [r.trend for r in available], min(wanted, len(available)),
+        [r.trend for r in available], min(int(wanted * 2), len(available)),
         israel_ratio=options.israel_ratio, seed=seed,
     )
     by_label = {r.trend.label(): r for r in available}
@@ -135,6 +149,7 @@ def create_mix(
         progress=render_progress,
         out_name=options.name,
         hype=options.hype,
+        max_tracks=wanted,
     )
 
     audio_path = result.files.get("mp3") or result.files["wav"]
@@ -167,6 +182,75 @@ def create_mix(
         },
         "missing": [m.to_dict() for m in resolution.missing[:50]],
         "chosen": [r.to_dict() for r in chosen],
+        "log": result.log,
+    }
+
+
+def _create_from_library(
+    options: CreateOptions,
+    progress: Callable[..., None],
+    source: LocalLibrarySource,
+    library: list,
+    wanted: int,
+) -> dict:
+    """Build a mix from the local library, ignoring charts entirely.
+
+    Trend matching only pays off once you own what is charting. Until then this
+    is what makes the app usable, and it stays useful afterwards for building a
+    set out of a crate you have curated yourself.
+    """
+    import random
+
+    if len(library) < 2:
+        raise ValueError(
+            f"a mix needs at least 2 tracks and MUSIC_DIR has {len(library)}. "
+            "Add more music, or run: python -m app.tools.fetch_cc --out ./music"
+        )
+
+    seed = options.seed if options.seed is not None else int(time.time())
+    rng = random.Random(seed)
+    # Over-supply: the renderer drops tracks whose tempo cannot be beat-matched
+    # to the set, so asking for exactly `wanted` would hand back a short mix.
+    candidates = rng.sample(library, min(int(wanted * 2), len(library)))
+
+    progress(f"building a {options.length_minutes:.0f} minute set from "
+             f"{len(candidates)} of your {len(library)} tracks", 0.7)
+
+    def render_progress(stage: str, fraction: float, **detail) -> None:
+        progress(stage, 0.70 + 0.28 * max(0.0, min(1.0, fraction)), **detail)
+
+    result = build_mix(
+        tracks=candidates,
+        target_minutes=options.length_minutes,
+        blend=options.blend,
+        tuning=get_tuning(),
+        progress=render_progress,
+        out_name=options.name,
+        hype=options.hype,
+        max_tracks=wanted,
+    )
+
+    audio_path = result.files.get("mp3") or result.files["wav"]
+    title = options.name or f"AutoDJ library mix {time.strftime('%d %b %Y %H:%M')}"
+
+    get_db().put_mix(
+        mix_id=result.name, title=title, audio_path=audio_path,
+        duration=result.files["duration"], options=options.model_dump(),
+        tracklist=result.tracklist.get("events", []), log=result.log,
+    )
+
+    return {
+        "name": result.name, "title": title,
+        "audio_url": f"/api/mixes/{result.name}/audio",
+        "duration": round(result.files["duration"], 2),
+        "files": result.files, "tracklist": result.tracklist,
+        "trends": {"total": len(library), "resolved": len(result.tracklist["tracks"]),
+                   "missing": 0,
+                   "coverage": 1.0, "providers": [], "warnings": [],
+                   "source": "library"},
+        "missing": [],
+        "chosen": [{"title": t["title"], "artist": t["artist"], "track": t}
+                   for t in result.tracklist["tracks"]],
         "log": result.log,
     }
 

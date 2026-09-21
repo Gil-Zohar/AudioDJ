@@ -160,6 +160,21 @@ class LibrosaBeatTracker(BeatTracker):
 
         low = _low_band_energy(y, sr, hop_length)
         novelty = _harmonic_novelty(y, sr, hop_length, beat_frames)
+
+        # The fitted line is extrapolated from beat *index*, so a few spurious
+        # early detections can push its start before zero -- real tracks hit
+        # this even though a synthetic fixture starting exactly on the grid
+        # never will. Negative times become negative frame indices downstream,
+        # which librosa rejects outright.
+        keep = beat_times >= 0.0
+        if not keep.all():
+            beat_times = beat_times[keep]
+            if novelty.size == keep.size:
+                novelty = novelty[keep]
+
+        if beat_times.size == 0:
+            beat_times, period = raw_beats, 0.0
+
         downbeats = infer_downbeats(
             beat_times, onset_env, low, sr, hop_length, beats_per_bar, novelty
         )

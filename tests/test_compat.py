@@ -215,3 +215,111 @@ def test_energy_scores_stay_bounded():
         for a in (0.0, 0.5, 1.0):
             for b in (0.0, 0.5, 1.0):
                 assert 0.0 <= energy_compat(a, b, intent).score <= 1.0
+
+
+# ---------------------------------------------------------- set tempo ------
+
+def test_fold_tempo_brings_octaves_together():
+    """174 and 87 BPM share a pulse; folding is what makes that visible."""
+    from app.matching.compat import fold_tempo
+
+    assert fold_tempo(174.0)[0] == pytest.approx(87.0)
+    assert fold_tempo(87.0)[0] == pytest.approx(87.0)
+    assert fold_tempo(60.0)[0] == pytest.approx(120.0)
+    assert fold_tempo(128.0)[0] == pytest.approx(128.0)
+
+
+def test_fold_tempo_reports_the_ratio_used():
+    from app.matching.compat import fold_tempo
+
+    folded, ratio = fold_tempo(180.0)
+    assert folded == pytest.approx(90.0)
+    assert ratio == pytest.approx(0.5)
+    assert folded == pytest.approx(180.0 * ratio)
+
+
+def test_fold_tempo_handles_nonsense():
+    from app.matching.compat import fold_tempo
+
+    assert fold_tempo(0.0) == (0.0, 1.0)
+    assert fold_tempo(-5.0) == (0.0, 1.0)
+
+
+def test_choose_set_tempo_picks_the_densest_cluster():
+    """The raw median is the obvious choice and a bad one.
+
+    A real library mix spanned 86-182 BPM; the median landed at 117, which
+    nothing could reach, and every track got stretched ~35% into mush.
+    """
+    from app.matching.compat import choose_set_tempo
+
+    bpms = [129.67, 124.58, 120.0, 114.05, 110.41, 91.19, 182.0, 86.5]
+    chosen = choose_set_tempo(bpms, tolerance=0.08)
+
+    within = [b for b in bpms if abs(b - chosen) / chosen <= 0.10]
+    assert len(within) >= 4, "the target must be reachable by most of the set"
+    assert 100 <= chosen <= 140
+
+
+def test_choose_set_tempo_ignores_a_lone_outlier():
+    from app.matching.compat import choose_set_tempo
+
+    chosen = choose_set_tempo([128.0, 127.0, 129.0, 128.5, 60.0], tolerance=0.08)
+    assert chosen == pytest.approx(128.0, abs=2.0)
+
+
+def test_choose_set_tempo_handles_empty_input():
+    from app.matching.compat import choose_set_tempo
+
+    assert choose_set_tempo([]) == 0.0
+    assert choose_set_tempo([0.0, -1.0]) == 0.0
+
+
+def test_stretch_to_target_uses_half_time_rather_than_mangling():
+    """182 BPM joining a 95 BPM set is a 4% nudge at half time, not 48%."""
+    from app.matching.compat import stretch_to_target
+
+    rate, deviation = stretch_to_target(182.0, 95.0)
+
+    assert deviation < 0.06, "half time should make this nearly free"
+    assert rate == pytest.approx(95.0 / 91.0, rel=0.02)
+
+
+def test_stretch_to_target_prefers_no_stretch_over_a_worse_fold():
+    """Folding must not be applied blindly.
+
+    Searching metrical levels has to keep whichever needs least stretching;
+    forcing a tempo into a fixed window can pick a worse ratio than leaving it
+    alone.
+    """
+    from app.matching.compat import stretch_to_target
+
+    # Exactly double: reinterpreting the level costs nothing at all.
+    rate, deviation = stretch_to_target(60.0, 120.0)
+    assert rate == pytest.approx(1.0)
+    assert deviation == pytest.approx(0.0)
+
+
+def test_stretch_deviation_is_symmetric():
+    """Speeding up and slowing down by the same factor are equally severe."""
+    from app.matching.compat import stretch_to_target
+
+    _, faster = stretch_to_target(100.0, 110.0)
+    _, slower = stretch_to_target(110.0, 100.0)
+    assert faster == pytest.approx(slower, rel=0.02)
+
+
+def test_stretch_to_target_is_identity_at_the_same_tempo():
+    from app.matching.compat import stretch_to_target
+
+    rate, deviation = stretch_to_target(128.0, 128.0)
+    assert rate == pytest.approx(1.0)
+    assert deviation == pytest.approx(0.0)
+
+
+def test_stretch_to_target_reports_genuinely_unreachable_tempos():
+    """Some tempos simply cannot be reconciled, and must say so."""
+    from app.matching.compat import stretch_to_target
+
+    _, deviation = stretch_to_target(86.5, 123.5)
+    assert deviation > 0.12, "this pair must exceed a sane stretch limit"

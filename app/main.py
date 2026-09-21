@@ -350,6 +350,29 @@ def analyze_library_endpoint(with_stems: bool = Query(True)) -> dict:
     return {"job_id": job.id, "events_url": f"/api/jobs/{job.id}/events", **job.to_dict()}
 
 
+@app.post("/api/library/fetch-cc")
+def fetch_cc_endpoint(count: int = Query(15, ge=1, le=50)) -> dict:
+    """Download Creative Commons music from the Internet Archive into MUSIC_DIR.
+
+    The only place AutoDJ fetches audio, and deliberately so: these files are
+    published for free redistribution. Commercial music still has to come from
+    your own library.
+    """
+    registry = get_registry()
+    job = registry.create("fetch_cc")
+    music_dir = get_settings().music_dir
+
+    def target(job, progress):
+        from app.tools.fetch_cc import fetch
+
+        result = fetch(music_dir, count=count, progress=progress)
+        get_source().scan(force=True)      # make them visible immediately
+        return result
+
+    registry.run(job, target)
+    return {"job_id": job.id, "events_url": f"/api/jobs/{job.id}/events", **job.to_dict()}
+
+
 @app.get("/api/jobs")
 def list_jobs() -> dict:
     return {"jobs": [j.to_dict() for j in get_registry().list()]}
