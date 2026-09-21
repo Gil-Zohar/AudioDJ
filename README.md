@@ -36,8 +36,12 @@ Built in stages. **Stage 1 is complete**: analysis and stem separation.
 
 ### 1. System dependencies
 
-AutoDJ shells out to `ffmpeg` for decoding/encoding and `rubberband` for
-time-stretching, so both must be on your `PATH`.
+AutoDJ shells out to `ffmpeg` for encoding and `rubberband` for time-stretching,
+so both must be on your `PATH`.
+
+**Neither is needed for Stage 1** (analysis). `soundfile` reads wav/flac/mp3 on
+its own. If you only want to try the analyzer, skip to step 2 and come back to
+this later.
 
 ```bash
 # Debian / Ubuntu
@@ -47,21 +51,55 @@ sudo apt-get install ffmpeg rubberband-cli libsndfile1
 brew install ffmpeg rubberband libsndfile
 ```
 
-Verify:
+**Windows:**
 
-```bash
-ffmpeg -version && rubberband --version
+```powershell
+winget install Gyan.FFmpeg
+```
+
+Rubber Band has no winget package. Download the command-line utility from
+https://breakfastquay.com/rubberband/ , unzip it, and add the folder containing
+`rubberband.exe` to your `PATH`. Reopen your terminal afterwards.
+
+Verify (in a new terminal):
+
+```
+ffmpeg -version
+rubberband --version
 ```
 
 ### 2. Python environment
 
-Python 3.11+.
+**Python 3.11 or newer, 64-bit.** This matters: numpy 2.x ships no 32-bit
+wheels, so a 32-bit interpreter cannot install the dependencies at all. Check
+what you have with `python -VV` — it must say 3.11+ and `[MSC v.xxxx 64 bit]`
+on Windows.
+
+**Linux / macOS:**
 
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
 pip install -e ".[dev]"
 ```
+
+**Windows (cmd.exe):**
+
+```bat
+py -3.11 -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+```
+
+**Windows (PowerShell):** same, but activate with `.venv\Scripts\Activate.ps1`.
+If PowerShell blocks the script, either use cmd.exe or run
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first.
+
+If `py -3.11` reports it cannot find that version, install 64-bit Python 3.11+
+from https://python.org/downloads/ and tick **"Add python.exe to PATH"** during
+setup.
 
 ### 3. Stem separation (optional but recommended)
 
@@ -90,13 +128,17 @@ you pay that cost once per file.
 ### 4. Configure
 
 ```bash
-cp .env.example .env
+cp .env.example .env        # Windows: copy .env.example .env
 ```
 
 Edit `.env` and set `MUSIC_DIR` to your library. That's the only required value:
 
 ```ini
+# Linux / macOS
 MUSIC_DIR=/home/you/Music
+
+# Windows - forward slashes, or escape backslashes
+MUSIC_DIR=C:/Users/you/Music
 ```
 
 API keys are optional and only affect trend providers (Stage 3). A provider with
@@ -114,7 +156,8 @@ no key simply switches itself off.
 uvicorn app.main:app --reload
 ```
 
-Open http://127.0.0.1:8000.
+Open http://127.0.0.1:8000. (If `uvicorn` is not found, the virtualenv is not
+active — activate it, or run `python -m uvicorn app.main:app --reload`.)
 
 ---
 
