@@ -241,6 +241,47 @@ TRACK_C = TrackSpec(
     sections=_standard_sections(),
 )
 
+
+def _long_sections() -> list[SectionSpec]:
+    """A full-length arrangement (~2.5 min), so a 60s mashup has room to breathe."""
+    return [
+        SectionSpec("intro", 8, drums=False, snare=False, bass=False, pad=True,
+                    lead=False, gain=0.30),
+        SectionSpec("verse", 16, drums=True, snare=False, bass=True, pad=True,
+                    lead=False, gain=0.62),
+        SectionSpec("chorus", 16, drums=True, snare=True, bass=True, pad=True,
+                    lead=True, gain=0.95),
+        SectionSpec("verse2", 16, drums=True, snare=False, bass=True, pad=True,
+                    lead=False, gain=0.65),
+        SectionSpec("drop", 16, drums=True, snare=True, bass=True, pad=False,
+                    lead=True, gain=1.15, double_kick=True),
+        SectionSpec("outro", 8, drums=False, snare=False, bass=True, pad=True,
+                    lead=False, gain=0.28),
+    ]
+
+
+# Full-length versions used for mashup rendering, where 32 bars must fit inside
+# a single section without running off the end of the track.
+TRACK_A_LONG = TrackSpec(
+    name="synth_long_a_128_amin",
+    bpm=128.0,
+    key_pitch_class=PITCH_TO_INDEX["A"],
+    key_mode="minor",
+    progression=[(57, "min"), (50, "min"), (52, "maj"), (57, "min")],
+    sections=_long_sections(),
+)
+
+TRACK_B_LONG = TrackSpec(
+    name="synth_long_b_124_emin",
+    bpm=124.0,
+    key_pitch_class=PITCH_TO_INDEX["E"],
+    key_mode="minor",
+    progression=[(52, "min"), (57, "min"), (59, "maj"), (52, "min")],
+    sections=_long_sections(),
+)
+
+LONG_TRACKS = [TRACK_A_LONG, TRACK_B_LONG]
+
 ALL_TRACKS = [TRACK_A, TRACK_B, TRACK_C]
 
 

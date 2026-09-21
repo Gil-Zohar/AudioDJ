@@ -27,11 +27,16 @@ dependencies = [
 [project.optional-dependencies]
 # Heavy: pulls torch (~2GB). Only needed for real Demucs stem separation.
 stems = ["demucs>=4.1"]
-dev = ["pytest", "pytest-asyncio"]
+dev = ["pytest", "pytest-asyncio", "playwright"]   # playwright drives the UI checks
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+    "ignore::FutureWarning",
+]
+markers = ["slow: end-to-end renders; deselect with -m 'not slow'"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

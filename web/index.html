@@ -11,12 +11,19 @@
 <header>
   <h1>Auto<span>DJ</span></h1>
   <span class="muted" id="status">loading…</span>
-  <span class="muted" style="margin-left:auto">Stage 1 — analysis &amp; stems</span>
+  <nav class="tabs">
+    <button class="tab active" data-view="library">Library</button>
+    <button class="tab" data-view="mashup">Mashup</button>
+    <button class="tab" data-view="mixes">Mixes</button>
+  </nav>
+  <span class="muted" style="margin-left:auto">Stage 2 — matching &amp; mashup</span>
 </header>
-<main>
+<main id="view-library">
   <div id="list"><div class="muted" style="padding:14px">scanning…</div></div>
   <div id="detail"><p class="muted">Pick a track on the left.</p></div>
 </main>
+<section id="view-mashup" class="panel" hidden></section>
+<section id="view-mixes" class="panel" hidden></section>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -63,6 +63,7 @@ class MatchingConfig(BaseModel):
 
 class RenderConfig(BaseModel):
     sample_rate: int = 44100
+    time_stretcher: Literal["auto", "rubberband", "librosa"] = "auto"
     channels: int = 2
     bitrate: str = "320k"
     transition_bars: int = 8

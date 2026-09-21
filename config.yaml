@@ -34,6 +34,9 @@ matching:
 
 render:
   sample_rate: 44100
+  # auto = rubberband if its executable is on PATH, else a phase-vocoder fallback.
+  # rubberband sounds clearly better on drums; install it from breakfastquay.com
+  time_stretcher: auto
   channels: 2
   bitrate: "320k"
   transition_bars: 8

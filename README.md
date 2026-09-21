@@ -20,12 +20,13 @@ instead.
 
 ## Status
 
-Built in stages. **Stage 1 is complete**: analysis and stem separation.
+Built in stages. **Stages 1 and 2 are complete**: analysis, stem separation,
+the matching engine and two-track mashup rendering.
 
 | Stage | What it adds | State |
 |---|---|---|
 | 1 | Analysis pipeline + stems | ✅ done |
-| 2 | Matching engine + 60s two-track mashup | planned |
+| 2 | Matching engine + 60s two-track mashup | ✅ done |
 | 3 | Full "Create" flow with trend providers | planned |
 | 4 | Hype layer (shouts / airhorns / risers) | planned |
 | 5 | Live mode (continuous streamed mix) | planned |
@@ -210,6 +211,8 @@ Secrets and paths live in `.env`. The settings you are most likely to touch:
 analysis:
   beat_tracker: auto        # auto | librosa | madmom
   stem_provider: hpss       # hpss (fast) | demucs (good)
+render:
+  time_stretcher: auto      # auto | rubberband (better) | librosa (no binary)
 matching:
   tempo_tolerance: 0.08     # how far we will stretch, +/- fraction
   max_pitch_shift: 2        # semitones we may shift to fix a key clash
@@ -224,6 +227,47 @@ trends:
 ```
 
 ---
+
+## How matching works
+
+Every decision is a weighted sum of four normalized terms, and every pair the
+renderer uses carries its own breakdown — so a mix that sounds wrong can be
+traced to the decision that caused it.
+
+- **Tempo** — searches metrical levels (same, half, double, optionally 3:2) and
+  keeps the best within `tempo_tolerance`. 175 and 87.5 BPM share a pulse, so
+  refusing to look at half time would throw away most cross-genre mixes. An
+  incompatible tempo is a **hard veto**: no amount of harmonic agreement rescues
+  a mix you cannot beat-match.
+- **Key** — Camelot-wheel distance, searched over pitch shifts up to
+  `max_pitch_shift`. Distance 0 is the same key; 1 is a classic compatible move
+  (one hour round the wheel, or the relative major/minor).
+- **Chroma** — cosine similarity of section chroma, **rotated by the shift the
+  key term chose**, so it measures the audio as it will actually be played. This
+  is the "this part sounds like that part" term.
+- **Energy** — scored against intent. A *build* into a drop is the goal, not a
+  failed match, so it is measured against its own target rather than penalised.
+
+Low key confidence shrinks the key term toward neutral instead of trusting it —
+the Mizrahi/maqam safeguard, visible in the UI as *"low key confidence,
+de-weighted"*.
+
+### Mashup rendering
+
+`vocal of A + instrumental stems of B`, put on one clock:
+
+1. Score every section pair, biased toward taking the vocal from a chorus or drop
+2. Stretch B onto A's tempo, and pitch-shift it if the keys clash
+3. Slice **on the downbeat grid** — this is what keeps the layers phase-locked
+4. Layer, apply an outro treatment, normalize to `headroom_db`
+5. Write WAV + MP3 + a JSON tracklist with timestamps
+
+Slice starts are pulled earlier automatically when a section sits too close to
+the end of the track to supply the bars requested.
+
+**Transitions** available (`config.yaml` → `transitions`): `bass_swap` (only one
+track holds the low end at a time — two basslines together sound muddy),
+`filter_sweep`, `echo_out` (tempo-synced delay), `reverb_tail`.
 
 ## How the analysis works
 
@@ -291,6 +335,8 @@ accuracy on those fixtures:
 | Camelot wheel | all **24** codes match the published wheel |
 | Downbeat phase | lands on bar one, spacing within 2% |
 | Section boundaries | **4/5** within 3s, snapped to within 0.05s of the true bar |
+| Mashup tempo | rendered audio lands within **0.32%** of the target BPM |
+| Mashup alignment | **0.56%** beat jitter — the two layers are locked |
 
 The 175 BPM fixture is deliberately detected at half time (~87.5) — the standard
 octave error. That is pinned by a test rather than "fixed", because the tempo
@@ -308,8 +354,8 @@ app/
   main.py           FastAPI routes
   sources/          AudioSource interface + LocalLibrarySource
   analysis/         beats, key, segments, energy, stems, pipeline
-  matching/         (stage 2) tempo/key/chroma compatibility + scorer
-  render/           (stage 2) timeline, transitions, encoding
+  matching/         compat (pure), scorer (pure), planner
+  render/           engine, timeline, transitions, mashup, encode
   trends/           (stage 3) Last.fm / YouTube / Apple providers
   live/             (stage 5) look-ahead renderer + MP3 broadcaster
 web/                plain HTML/JS front end, no build step
@@ -329,3 +375,7 @@ samples/            your hype one-shots (gitignored)
 | `POST` | `/api/tracks/{id}/key` | pin key by hand |
 | `DELETE` | `/api/tracks/{id}/key` | revert to detected key |
 | `POST` | `/api/tracks/{id}/stems` | separate stems |
+| `GET` | `/api/match?a={id}&b={id}` | ranked section pairs with score breakdowns |
+| `POST` | `/api/mashup` | render a mashup (`track_a`, `track_b`, `bars`, `transition`) |
+| `GET` | `/api/mixes` | rendered mixes |
+| `GET` | `/api/mixes/{id}/audio` | stream a mix |

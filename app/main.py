@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
@@ -15,6 +16,8 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.analysis.key import key_name
+from app.matching.scorer import rank_pairs
+from app.render.mashup import build_mashup
 from app.analysis.pipeline import (
     PIPELINE_VERSION,
     analyze_track,
@@ -186,6 +189,110 @@ def _analysis_payload(track: TrackMeta, analysis) -> dict:
         "energy_curve": [round(v, 3) for v in analysis.energy_curve],
         "pitch_names": PITCH_NAMES,
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: matching and mashup rendering
+# ---------------------------------------------------------------------------
+
+@app.get("/api/match")
+async def match(a: str, b: str, intent: str = Query("match"), top: int = Query(10)) -> dict:
+    """Rank how each section of A could move into each section of B."""
+    track_a, track_b = _require_track(a), _require_track(b)
+    tuning = get_tuning()
+
+    analysis_a = await run_in_threadpool(analyze_track, track_a, tuning)
+    analysis_b = await run_in_threadpool(analyze_track, track_b, tuning)
+
+    pairs = rank_pairs(analysis_a, analysis_b, tuning.matching, intent=intent, top_n=top)
+    return {
+        "a": {"id": track_a.id, "title": track_a.title, "bpm": round(analysis_a.bpm, 2),
+              "camelot": analysis_a.key.camelot,
+              "key_confidence": round(analysis_a.key.confidence, 3)},
+        "b": {"id": track_b.id, "title": track_b.title, "bpm": round(analysis_b.bpm, 2),
+              "camelot": analysis_b.key.camelot,
+              "key_confidence": round(analysis_b.key.confidence, 3)},
+        "intent": intent,
+        "count": len(pairs),
+        "pairs": [p.to_dict() for p in pairs],
+    }
+
+
+class MashupRequest(BaseModel):
+    track_a: str                       # supplies the vocal
+    track_b: str                       # supplies the instrumental bed
+    bars: int = Field(default=32, ge=4, le=256)
+    transition: Optional[str] = None
+    name: Optional[str] = None
+
+
+@app.post("/api/mashup")
+async def mashup(body: MashupRequest) -> dict:
+    """Render a mashup: vocal of A over the instrumental of B."""
+    track_a, track_b = _require_track(body.track_a), _require_track(body.track_b)
+
+    try:
+        result = await run_in_threadpool(
+            build_mashup, track_a, track_b, body.bars, get_tuning(),
+            lambda stage, fraction: None, body.name, body.transition,
+        )
+    except ValueError as exc:
+        # A genuinely incompatible pair is a user-fixable problem, not a crash.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        log.exception("mashup failed")
+        raise HTTPException(status_code=500, detail=f"render failed: {exc}") from exc
+
+    audio = result.files.get("mp3") or result.files["wav"]
+    get_db().put_mix(
+        mix_id=result.name,
+        title=f"{track_a.title} x {track_b.title}",
+        audio_path=audio,
+        duration=result.files["duration"],
+        options={"mode": "mashup", "bars": body.bars, "transition": body.transition},
+        tracklist=result.tracklist.get("events", []),
+        log=result.log,
+    )
+
+    return {
+        "name": result.name,
+        "files": result.files,
+        "audio_url": f"/api/mixes/{result.name}/audio",
+        "duration": round(result.files["duration"], 2),
+        "match": result.pair.to_dict() if result.pair else None,
+        "tracklist": result.tracklist,
+        "log": result.log,
+    }
+
+
+@app.get("/api/mixes")
+def list_mixes() -> dict:
+    mixes = get_db().list_mixes()
+    for mix in mixes:
+        mix["audio_url"] = f"/api/mixes/{mix['id']}/audio"
+    return {"count": len(mixes), "mixes": mixes}
+
+
+@app.get("/api/mixes/{mix_id}/audio")
+def mix_audio(mix_id: str):
+    mix = get_db().get_mix(mix_id)
+    if mix is None:
+        raise HTTPException(status_code=404, detail=f"unknown mix: {mix_id}")
+    path = Path(mix["audio_path"])
+    if not path.exists():
+        raise HTTPException(status_code=410, detail=f"mix file is gone: {path}")
+    media = "audio/mpeg" if path.suffix.lower() == ".mp3" else "audio/wav"
+    return FileResponse(path, media_type=media, filename=path.name)
+
+
+@app.get("/api/mixes/{mix_id}")
+def mix_detail(mix_id: str) -> dict:
+    mix = get_db().get_mix(mix_id)
+    if mix is None:
+        raise HTTPException(status_code=404, detail=f"unknown mix: {mix_id}")
+    mix["audio_url"] = f"/api/mixes/{mix_id}/audio"
+    return mix
 
 
 WEB_DIR = PROJECT_ROOT / "web"

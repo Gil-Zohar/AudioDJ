@@ -41,3 +41,21 @@ def analyses(fixture_paths):
     source = LocalLibrarySource(FIXTURE_DIR)
     tracks = {t.title: t for t in source.scan()}
     return {name: analyze_track(track) for name, track in tracks.items()}
+
+
+@pytest.fixture(scope="session")
+def long_fixture_paths(isolated_data_dir):
+    """Full-length synthetic tracks, so a multi-bar mashup has room to fit."""
+    from tests.fixtures.synth import LONG_TRACKS, ensure_fixtures
+
+    return ensure_fixtures(FIXTURE_DIR, LONG_TRACKS)
+
+
+@pytest.fixture(scope="session")
+def long_fixture_tracks(long_fixture_paths):
+    from app.sources.local import LocalLibrarySource
+    from tests.fixtures.synth import TRACK_A_LONG, TRACK_B_LONG
+
+    source = LocalLibrarySource(FIXTURE_DIR)
+    tracks = {t.title: t for t in source.scan()}
+    return tracks[TRACK_A_LONG.name], tracks[TRACK_B_LONG.name]

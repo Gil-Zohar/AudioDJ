@@ -127,3 +127,150 @@ function drawEnergy(a) {
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 boot();
+
+// ---------------------------------------------------------------- tabs ----
+const VIEWS = ["library", "mashup", "mixes"];
+
+function showView(name) {
+  document.querySelectorAll(".tab").forEach(t =>
+    t.classList.toggle("active", t.dataset.view === name));
+  document.getElementById("view-library").style.display = name === "library" ? "grid" : "none";
+  VIEWS.filter(v => v !== "library").forEach(v => {
+    document.getElementById("view-" + v).hidden = v !== name;
+  });
+  if (name === "mashup") renderMashupForm();
+  if (name === "mixes") renderMixes();
+}
+
+document.querySelectorAll(".tab").forEach(t =>
+  t.addEventListener("click", () => showView(t.dataset.view)));
+
+// -------------------------------------------------------------- mashup ----
+function trackOptions(selected) {
+  return tracks.map(t =>
+    `<option value="${t.id}" ${t.id === selected ? "selected" : ""}>` +
+    `${esc(t.artist ? t.artist + " - " : "")}${esc(t.title)}` +
+    `${t.bpm ? ` [${t.bpm} BPM ${t.camelot}]` : ""}</option>`).join("");
+}
+
+function renderMashupForm() {
+  const el = document.getElementById("view-mashup");
+  if (tracks.length < 2) {
+    el.innerHTML = `<p class="muted">Need at least two tracks in MUSIC_DIR to build a mashup.</p>`;
+    return;
+  }
+  el.innerHTML = `
+    <h2>Build a mashup</h2>
+    <p class="muted">Vocal of A layered over the instrumental stems of B, beat-matched and
+      key-corrected. First run analyses and separates stems, so it takes a minute.</p>
+    <div class="row">
+      <div class="field"><label>A — vocal</label>
+        <select id="ma">${trackOptions(tracks[0].id)}</select></div>
+      <div class="field"><label>B — instrumental</label>
+        <select id="mb">${trackOptions(tracks[1] && tracks[1].id)}</select></div>
+      <div class="field"><label>Bars</label>
+        <input type="number" id="mbars" value="32" min="4" max="256" step="4"></div>
+      <div class="field"><label>Outro</label>
+        <select id="mtr">
+          <option value="">default</option>
+          <option value="bass_swap">bass swap</option>
+          <option value="filter_sweep">filter sweep</option>
+          <option value="echo_out">echo out</option>
+          <option value="reverb_tail">reverb tail</option>
+        </select></div>
+      <button id="mgo">Build mashup</button>
+      <button id="mpreview" class="ghost">Preview match only</button>
+    </div>
+    <div id="mout"></div>`;
+  document.getElementById("mgo").onclick = buildMashup;
+  document.getElementById("mpreview").onclick = previewMatch;
+}
+
+function termBar(name, score, weight, contribution) {
+  return `<div class="card">
+    <div class="k">${name} <span style="float:right">w ${weight.toFixed(2)}</span></div>
+    <div class="v">${(score * 100).toFixed(0)}%</div>
+    <div class="bar"><i style="width:${Math.max(0, Math.min(100, score * 100))}%"></i></div>
+    <div class="muted">contributes ${contribution.toFixed(3)}</div>
+  </div>`;
+}
+
+function renderBreakdown(bd) {
+  const t = bd.terms, c = bd.contributions;
+  return `<div class="terms">
+      ${termBar("Tempo", t.tempo.score, t.tempo.weight, c.tempo)}
+      ${termBar("Key", t.key.score, t.key.weight, c.key)}
+      ${termBar("Chroma", t.chroma.score, t.chroma.weight, c.chroma)}
+      ${termBar("Energy", t.energy.score, t.energy.weight, c.energy)}
+    </div>
+    <h3>Why this pair</h3>
+    <div class="reasons">${bd.reasons.map(esc).join("\n")}</div>`;
+}
+
+async function previewMatch() {
+  const a = document.getElementById("ma").value, b = document.getElementById("mb").value;
+  const out = document.getElementById("mout");
+  out.innerHTML = `<p class="muted"><span class="spin">◐</span> analysing…</p>`;
+  try {
+    const r = await api(`/api/match?a=${a}&b=${b}&top=5`);
+    if (!r.pairs.length) {
+      out.innerHTML = `<p class="err">No compatible section pairs.
+        ${esc(r.a.title)} is ${r.a.bpm} BPM, ${esc(r.b.title)} is ${r.b.bpm} BPM —
+        outside the tempo tolerance in config.yaml.</p>`;
+      return;
+    }
+    out.innerHTML = `<h3>Top ${r.pairs.length} section pairs</h3>` + r.pairs.map((p, i) => `
+      <div class="mix">
+        <b>#${i + 1} — score ${p.score.toFixed(3)}</b>
+        <div class="muted">${p.section_a.label} @${p.section_a.start}s →
+          ${p.section_b.label} @${p.section_b.start}s</div>
+        ${i === 0 ? renderBreakdown(p.breakdown) : ""}
+      </div>`).join("");
+  } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+async function buildMashup() {
+  const btn = document.getElementById("mgo"), out = document.getElementById("mout");
+  const body = {
+    track_a: document.getElementById("ma").value,
+    track_b: document.getElementById("mb").value,
+    bars: +document.getElementById("mbars").value,
+    transition: document.getElementById("mtr").value || null,
+  };
+  btn.disabled = true; btn.textContent = "rendering…";
+  out.innerHTML = `<p class="muted"><span class="spin">◐</span>
+    analysing, separating stems, stretching and mixing…</p>`;
+  try {
+    const r = await api("/api/mashup", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    out.innerHTML = `
+      <h3>${esc(r.name)} — ${fmt(r.duration)}</h3>
+      <audio controls src="${r.audio_url}"></audio>
+      ${r.match ? renderBreakdown(r.match.breakdown) : ""}
+      <h3>Render log</h3>
+      <div class="reasons">${r.log.map(esc).join("\n")}</div>`;
+  } catch (e) {
+    out.innerHTML = `<p class="err">${esc(e.message)}</p>`;
+  } finally { btn.disabled = false; btn.textContent = "Build mashup"; }
+}
+
+// --------------------------------------------------------------- mixes ----
+async function renderMixes() {
+  const el = document.getElementById("view-mixes");
+  el.innerHTML = `<p class="muted">loading…</p>`;
+  try {
+    const r = await api("/api/mixes");
+    el.innerHTML = `<h2>Mixes</h2>` + (r.mixes.length
+      ? r.mixes.map(m => `
+          <div class="mix">
+            <b>${esc(m.title)}</b>
+            <div class="muted">${new Date(m.created_at * 1000).toLocaleString()} ·
+              ${fmt(m.duration)} · ${esc(m.options.mode || "mix")}
+              ${m.options.bars ? "· " + m.options.bars + " bars" : ""}</div>
+            <audio controls src="${m.audio_url}"></audio>
+          </div>`).join("")
+      : `<p class="muted">No mixes yet — build one from the Mashup tab.</p>`);
+  } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
