@@ -20,15 +20,16 @@ instead.
 
 ## Status
 
-Built in stages. **Stages 1-3 are complete**: analysis, stem separation, the
-matching engine, mashup rendering, and the full Create flow with live trends.
+Built in stages. **Stages 1-4 are complete**: analysis, stem separation, the
+matching engine, mashup rendering, the full Create flow with live trends, and
+the hype layer.
 
 | Stage | What it adds | State |
 |---|---|---|
 | 1 | Analysis pipeline + stems | ✅ done |
 | 2 | Matching engine + 60s two-track mashup | ✅ done |
 | 3 | Full "Create" flow with trend providers | ✅ done |
-| 4 | Hype layer (shouts / airhorns / risers) | planned |
+| 4 | Hype layer (shouts / airhorns / risers) | ✅ done |
 | 5 | Live mode (continuous streamed mix) | planned |
 
 ---
@@ -301,6 +302,46 @@ threads), so a first mix that has to separate eight unseen tracks will sit there
 for a while. Press **Analyze library** once and it caches everything; later mixes
 then render in seconds. Results are keyed per file, so you pay it once.
 
+## The hype layer
+
+Risers, impacts and airhorns placed before drops. Set **Hype** to `off`,
+`light` or `heavy` in the Create tab, or `hype.density` in `config.yaml`.
+
+**Placement is the whole thing.** A riser dropped anywhere sounds like a
+mistake; a riser that *ends exactly on* the downbeat of a chorus sounds
+deliberate. So every element is anchored to a cue the analysis already found —
+a drop, a chorus start, a transition — rather than to the clock:
+
+- a **riser** is trimmed so its peak lands on the cue
+- an **impact** lands exactly on it
+- an **airhorn** follows two beats later, at `heavy` only
+
+Elements are spaced by a minimum gap so they never stack on each other.
+
+### Samples
+
+Drop one-shots into `./samples`. They are classified by filename, and common
+synonyms work too:
+
+```
+riser_*.wav  build_*  uplifter_*      impact_*.wav  hit_*  boom_*
+airhorn_*.wav  horn_*                 shout_*.wav  vox_*  voice_*
+sweep_*.wav  downlifter_*
+```
+
+**You do not need any of these to start.** If a category is empty, AutoDJ
+synthesises a usable default into `data/cache/hype_samples/` — a real filter
+sweep, not just a volume ramp, so a riser genuinely brightens and builds. Your
+own samples always take precedence, and unrecognised filenames are skipped
+rather than guessed at.
+
+### Text to speech
+
+`TtsProvider` is defined with a null implementation, and no voice ships by
+default: a decent Hebrew voice means either a large local model or a network
+call at render time, and neither belongs in the core path uninvited. Implement
+the interface and register it in `get_tts_provider` to add shouts.
+
 ## How matching works
 
 Every decision is a weighted sum of four normalized terms, and every pair the
@@ -413,6 +454,7 @@ accuracy on those fixtures:
 | Create flow | 168 trending merged, 8-track 14:18 mix rendered in **72s**, no clipping, zero dead air |
 | Hebrew | survives tags, normalization, fuzzy matching, SSE and tracklist JSON |
 | Library mode | 13:43 mix from 8 real CC tracks, worst stretch **8.3%**, rendered audio within **0.4%** of its target tempo |
+| Hype layer | risers build into **6 of 6** cues (1.4x–27x high-band energy), `off` places none, no clipping |
 
 The 175 BPM fixture is deliberately detected at half time (~87.5) — the standard
 octave error. That is pinned by a test rather than "fixed", because the tempo
@@ -431,7 +473,7 @@ app/
   sources/          AudioSource interface + LocalLibrarySource
   analysis/         beats, key, segments, energy, stems, pipeline
   matching/         compat (pure), scorer (pure), planner
-  render/           engine, timeline, transitions, mashup, encode
+  render/           engine, timeline, transitions, mashup, mix, hype, encode
   tools/fetch_cc.py Creative Commons downloader (Internet Archive)
   trends/           providers, weighted merge, fuzzy resolver
   jobs.py           background jobs + SSE progress

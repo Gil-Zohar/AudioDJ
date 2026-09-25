@@ -212,7 +212,11 @@ def build_mix(
         rate, _ = stretch_to_target(analysis.bpm, target_bpm)
         semitones = float(planned.pair.breakdown.key.semitones) if planned else 0.0
 
-        audio = _take(track.path, analysis, start, bars_each,
+        # Clamp here rather than only inside _take, so the cue mapping below
+        # uses the same start the audio was actually cut from.
+        actual_start = min(start, latest_start_for_bars(analysis, bars_each))
+
+        audio = _take(track.path, analysis, actual_start, bars_each,
                       sample_rate, rate, semitones, stretcher)
         if audio.size == 0:
             log.append(f"skipped {track.title}: no audio at the chosen section")
@@ -268,12 +272,27 @@ def build_mix(
                             source_track=previous.id, stem="instrumental",
                         ))
 
-        timeline.mark(max(cursor, 0.0), "track_in",
+        track_start = max(cursor, 0.0)
+        timeline.mark(track_start, "track_in",
                       f"{track.artist} - {track.title}" if track.artist else track.title,
                       track=track.id, bpm=round(analysis.bpm, 2),
                       key=analysis.key.camelot,
                       stretch_percent=round((rate - 1) * 100, 2),
                       pitch_semitones=semitones)
+
+        # Mark where this track's drops and choruses land in mix time, so the
+        # hype layer has real musical anchors instead of guessing. Source time
+        # maps to mix time by the stretch actually applied.
+        source_span = segment_seconds * rate
+        for section in analysis.sections:
+            if section.label not in ("drop", "chorus"):
+                continue
+            offset = section.start - actual_start
+            if not (0.0 < offset < source_span):
+                continue
+            timeline.mark(track_start + offset / rate, "cue", section.label,
+                          track=track.id, energy=round(section.energy, 3))
+
         cursor += segment_seconds
 
     # -- hype layer (stage 4 plugs in here) --------------------------------
