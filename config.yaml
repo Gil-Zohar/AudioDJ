@@ -22,9 +22,16 @@ matching:
   max_pitch_shift: 2          # semitones we may shift to fix a key clash
   min_score: 0.45             # below this a pair is never used
   top_n: 20
-  # Low key confidence shrinks the key term instead of trusting a bad detection.
-  # Critical for Mizrahi/maqam material where 12-TET key detection is unreliable.
-  key_confidence_floor: 0.35
+  # Confidence at or above this is trusted fully; below it the key term fades
+  # toward neutral rather than trusting a bad detection. Critical for
+  # Mizrahi/maqam material, which does not sit in 12-TET major/minor.
+  #
+  # Calibrated against 48 real tracks: confidence ran p25 0.049, median 0.115,
+  # p95 0.185, max 0.227. The original 0.35 was guessed and trusted NOTHING --
+  # the key term could only swing between 0.34 and 0.66, so harmonic mixing was
+  # barely affecting the result at all. Set just under the observed median so a
+  # typical detection is trusted and only genuinely ambiguous ones fade.
+  key_confidence_floor: 0.11
   weights:
     tempo: 0.30
     key: 0.25
@@ -61,6 +68,19 @@ transitions:
   reverb_tail:
     room_size: 0.8
     wet: 0.4
+
+fx:
+  # clean       = no production effects, straight blends
+  # club        = sidechain pump, filter builds into transitions, delay throws
+  # atmospheric = club, plus a sustained pad across each transition and a
+  #               light reverb wash. The pad also glues together tracks whose
+  #               styles do not obviously belong side by side.
+  style: club
+  # Each of these overrides the style preset; leave blank to use the preset.
+  sidechain:            # 0..0.95 ducking depth
+  pad_gain_db:          # e.g. -19
+  filter_build_bars:    # bars of rising high-pass into a transition
+  wash:                 # 0..1 reverb send
 
 hype:
   density: light              # off | light | heavy

@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field
@@ -57,7 +57,7 @@ class MatchingConfig(BaseModel):
     max_pitch_shift: int = 2
     min_score: float = 0.45
     top_n: int = 20
-    key_confidence_floor: float = 0.35
+    key_confidence_floor: float = 0.11
     weights: ScoringWeights = Field(default_factory=ScoringWeights)
     energy: EnergyConfig = Field(default_factory=EnergyConfig)
 
@@ -84,6 +84,17 @@ class TransitionsConfig(BaseModel):
     filter_sweep: dict = Field(default_factory=dict)
     echo_out: dict = Field(default_factory=dict)
     reverb_tail: dict = Field(default_factory=dict)
+
+
+class FxConfig(BaseModel):
+    """Production effects applied while rendering a set."""
+
+    style: Literal["clean", "club", "atmospheric"] = "club"
+    # Each may override the style preset; leave null to take the preset value.
+    sidechain: Optional[float] = None
+    pad_gain_db: Optional[float] = None
+    filter_build_bars: Optional[int] = None
+    wash: Optional[float] = None
 
 
 class HypeConfig(BaseModel):
@@ -115,6 +126,7 @@ class TuningConfig(BaseModel):
     matching: MatchingConfig = Field(default_factory=MatchingConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     transitions: TransitionsConfig = Field(default_factory=TransitionsConfig)
+    fx: FxConfig = Field(default_factory=FxConfig)
     hype: HypeConfig = Field(default_factory=HypeConfig)
     trends: TrendsConfig = Field(default_factory=TrendsConfig)
     live: LiveConfig = Field(default_factory=LiveConfig)

@@ -318,6 +318,12 @@ function renderCreate() {
           <option value="classic" selected>classic DJ</option>
           <option value="mashup">mashup</option>
         </select></div>
+      <div class="field"><label>Effects</label>
+        <select id="c-fx" title="Production effects applied to transitions">
+          <option value="clean">clean</option>
+          <option value="club" selected>club — pump, builds, delays</option>
+          <option value="atmospheric">atmospheric — + pads &amp; wash</option>
+        </select></div>
       <button id="c-go">Create</button>
       <button id="c-analyze" class="ghost"
         title="Pre-separate stems so later mixes render fast">Analyze library</button>
@@ -366,6 +372,7 @@ async function startCreate() {
     israel_ratio: +document.getElementById("c-ratio").value,
     hype: document.getElementById("c-hype").value,
     blend: document.getElementById("c-blend").value,
+    fx: document.getElementById("c-fx").value,
   };
   try {
     const job = await api("/api/create", {

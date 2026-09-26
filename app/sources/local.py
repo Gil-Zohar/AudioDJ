@@ -87,12 +87,15 @@ def _read_tags(path: Path) -> tuple[str, str, str, float]:
         pass
 
     if not title or not artist:
-        # "Artist - Title.mp3" is the overwhelmingly common convention.
+        # "Artist - Title.mp3" is the overwhelmingly common convention, but
+        # en- and em-dashes are just as common in practice, especially on
+        # Hebrew filenames.
         stem = path.stem
-        if " - " in stem:
-            guess_artist, guess_title = stem.split(" - ", 1)
-        else:
-            guess_artist, guess_title = "", stem
+        guess_artist, guess_title = "", stem
+        for separator in (" - ", " – ", " — ", " | "):
+            if separator in stem:
+                guess_artist, guess_title = stem.split(separator, 1)
+                break
         title = title or guess_title.strip()
         artist = artist or guess_artist.strip()
     return title, artist, album, duration

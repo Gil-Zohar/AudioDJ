@@ -323,3 +323,48 @@ def test_stretch_to_target_reports_genuinely_unreachable_tempos():
 
     _, deviation = stretch_to_target(86.5, 123.5)
     assert deviation > 0.12, "this pair must exceed a sane stretch limit"
+
+
+def test_key_confidence_floor_is_calibrated_to_real_music():
+    """Guards a real mis-calibration.
+
+    The floor was originally guessed at 0.35. Measured across 48 real tracks,
+    confidence ran p25 0.049, median 0.115, max 0.227 -- so NOTHING cleared it,
+    every key term was pinned near neutral, and harmonic mixing barely affected
+    the result. The floor has to sit near the middle of the real distribution:
+    typical detections trusted, genuinely weak ones faded out.
+    """
+    from app.config import MatchingConfig
+
+    floor = MatchingConfig().key_confidence_floor
+    typical, weak = 0.115, 0.02      # observed median and 5th percentile
+
+    assert floor <= typical, "a typical detection must be trusted"
+    assert floor > weak, "a genuinely ambiguous detection must still be faded"
+
+    trusted = key_compat(9, "minor", 9, "minor",
+                         confidence_a=typical, confidence_b=typical,
+                         confidence_floor=floor)
+    faded = key_compat(9, "minor", 9, "minor",
+                       confidence_a=weak, confidence_b=weak,
+                       confidence_floor=floor)
+
+    assert trusted.score > 0.9, "a confident perfect match should score near 1"
+    assert faded.score < trusted.score
+    assert faded.confidence_weight < 0.5
+
+
+def test_key_term_can_span_its_full_range_at_typical_confidence():
+    """At real-world confidence the term must actually discriminate."""
+    from app.config import MatchingConfig
+
+    floor = MatchingConfig().key_confidence_floor
+    same = key_compat(9, "minor", 9, "minor", max_shift=0,
+                      confidence_a=0.115, confidence_b=0.115, confidence_floor=floor)
+    clash = key_compat(9, "minor", 3, "major", max_shift=0,
+                       confidence_a=0.115, confidence_b=0.115, confidence_floor=floor)
+
+    assert same.score - clash.score > 0.5, (
+        "a perfect key match and a clash must be clearly separated, "
+        f"got {same.score:.2f} vs {clash.score:.2f}"
+    )

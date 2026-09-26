@@ -38,6 +38,7 @@ class CreateOptions(BaseModel):
     israel_ratio: float = Field(default=0.7, ge=0.0, le=1.0)
     hype: Literal["off", "light", "heavy"] = "light"
     blend: Literal["classic", "mashup"] = "classic"
+    fx: Optional[Literal["clean", "club", "atmospheric"]] = None
     track_count: Optional[int] = Field(default=None, ge=2, le=40)
     seed: Optional[int] = None
     name: Optional[str] = None
@@ -150,6 +151,7 @@ def create_mix(
         out_name=options.name,
         hype=options.hype,
         max_tracks=wanted,
+        fx_style=options.fx,
     )
 
     audio_path = result.files.get("mp3") or result.files["wav"]
@@ -228,6 +230,7 @@ def _create_from_library(
         out_name=options.name,
         hype=options.hype,
         max_tracks=wanted,
+        fx_style=options.fx,
     )
 
     audio_path = result.files.get("mp3") or result.files["wav"]

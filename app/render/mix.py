@@ -22,6 +22,14 @@ from app.matching.compat import choose_set_tempo, stretch_to_target
 from app.matching.planner import SetPlan, plan_set
 from app.models import Analysis, TrackMeta
 from app.render.encode import export_mix
+from app.render.fx import (
+    atmosphere_pad,
+    delay_throw,
+    filter_build,
+    resolve_style,
+    sidechain,
+    wash,
+)
 from app.render.engine import (
     get_stretcher,
     latest_start_for_bars,
@@ -111,6 +119,7 @@ def build_mix(
     out_name: Optional[str] = None,
     hype: Optional[str] = None,
     max_tracks: Optional[int] = None,
+    fx_style: Optional[str] = None,
 ) -> MixResult:
     """Order the tracks for energy flow, then render the set.
 
@@ -186,6 +195,18 @@ def build_mix(
     stretcher = get_stretcher(render_config.time_stretcher)
     timeline = Timeline(sample_rate=sample_rate, channels=render_config.channels)
 
+    fx = resolve_style(fx_style or tuning.fx.style, {
+        "sidechain": tuning.fx.sidechain,
+        "pad_gain_db": tuning.fx.pad_gain_db,
+        "filter_build_bars": tuning.fx.filter_build_bars,
+        "wash": tuning.fx.wash,
+    })
+    log.append(
+        f"fx style '{fx.style}': sidechain {fx.sidechain:.2f}, "
+        f"build {fx.filter_build_bars} bars, "
+        f"pads {'on' if fx.pads_enabled else 'off'}, wash {fx.wash:.2f}"
+    )
+
     # -- separate stems --------------------------------------------------
     stems = {}
     need_stems = blend == "mashup"
@@ -234,6 +255,21 @@ def build_mix(
             outgoing_tail = _tail_of(timeline, cursor, overlap, sample_rate)
             incoming_head = audio[..., : int(overlap * sample_rate)]
 
+            # Work the outgoing track on its way out, the way a DJ would: pull
+            # the low end away with a rising high-pass so tension builds, then
+            # throw the last beat into a tempo-synced delay.
+            applied = []
+            if fx.filter_build_bars:
+                outgoing_tail = filter_build(
+                    outgoing_tail, sample_rate, target_bpm, fx.filter_build_bars)
+                applied.append(f"{fx.filter_build_bars}-bar filter build")
+            if fx.delay_throw:
+                outgoing_tail = delay_throw(outgoing_tail, sample_rate, target_bpm)
+                applied.append("delay throw")
+            if fx.wash > 0:
+                outgoing_tail = wash(outgoing_tail, sample_rate, wet=fx.wash)
+                applied.append(f"wash {fx.wash:.2f}")
+
             result = apply_transition(name, outgoing_tail, incoming_head,
                                       sample_rate, target_bpm, tuning.transitions)
 
@@ -251,7 +287,29 @@ def build_mix(
             log.append(
                 f"{ordered[index - 1].title} -> {track.title}: {result.description} "
                 f"at {cursor:.1f}s"
+                + (f" [{', '.join(applied)}]" if applied else "")
             )
+
+            # A pad held across the join gives the ear something continuous to
+            # follow. Two tracks can share a tempo and a key and still sound
+            # like an abrupt stylistic jump; this is what a DJ reaches for when
+            # blending records that do not obviously belong together.
+            if fx.pads_enabled:
+                pad_seconds = overlap + bar_seconds * 2
+                pad = atmosphere_pad(
+                    pad_seconds, sample_rate,
+                    pitch_class=analysis.key.pitch_class,
+                    mode=analysis.key.mode,
+                    bpm=target_bpm, seed=index,
+                )
+                if fx.sidechain > 0:
+                    pad = sidechain(pad, sample_rate, target_bpm, fx.sidechain)
+                timeline.add(Clip(
+                    audio=pad, start=max(0.0, cursor - bar_seconds),
+                    gain_db=fx.pad_gain_db,
+                    name=f"atmosphere pad ({analysis.key.camelot})",
+                    source_track=track.id, stem="fx",
+                ))
 
             if blend == "mashup" and index < len(ordered) and track.id in stems:
                 previous = ordered[index - 1]
@@ -315,6 +373,7 @@ def build_mix(
         "name": name,
         "created_at": time.time(),
         "mode": blend,
+        "fx_style": fx.style,
         "target_bpm": round(target_bpm, 2),
         "duration": round(audio.shape[-1] / sample_rate, 2),
         "tracks": [
