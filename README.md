@@ -161,6 +161,66 @@ uvicorn app.main:app --reload
 Open http://127.0.0.1:8000. (If `uvicorn` is not found, the virtualenv is not
 active — activate it, or run `python -m uvicorn app.main:app --reload`.)
 
+`python -m app` runs it using `HOST`/`PORT` from `.env` instead, and prints the
+address to open on your phone. See [Opening it on your phone](#opening-it-on-your-phone).
+
+---
+
+## Opening it on your phone
+
+The server listens on `127.0.0.1` by default, which means *this computer only* —
+that is why your phone cannot see it. To reach it from a phone on the same Wi-Fi:
+
+**1. Listen on the network** (either one):
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+or set `HOST=0.0.0.0` in `.env` and run `python -m app`, which prints the exact
+URL to type into your phone.
+
+**2. Find your computer's address on the network:**
+
+```bat
+ipconfig            :: Windows - "IPv4 Address" under your Wi-Fi adapter
+```
+```bash
+hostname -I              # Linux
+ipconfig getifaddr en0   # macOS
+```
+
+It normally looks like `192.168.1.42` or `10.0.0.7`.
+
+**3. Allow it through the firewall.** The first time you run with `--host
+0.0.0.0`, Windows shows a Defender prompt — tick **Private networks** and allow.
+If you dismissed it, re-enable it under *Windows Security → Firewall & network
+protection → Allow an app through firewall*.
+
+**4. On your phone**, join the same Wi-Fi and open `http://192.168.1.42:8000`
+(your address from step 2). Use `http://`, not `https://`.
+
+The interface is responsive: the tab bar scrolls, the library stacks above the
+detail pane, and the section map, energy curve and tracklists all fit a phone
+screen. Rendered mixes play in the browser, so you can start a mix on the PC and
+listen on the phone.
+
+### Before you do this
+
+**AutoDJ has no login.** Binding to `0.0.0.0` exposes your music library, its
+analysis and the audio itself to everyone on that network. That is fine on your
+home Wi-Fi; do not do it on café, airport, hotel or office Wi-Fi. Set `HOST`
+back to `127.0.0.1` when you are done.
+
+### If the phone cannot connect
+
+| Check | |
+|---|---|
+| Same network? | Phone on Wi-Fi, not mobile data. Guest Wi-Fi is usually isolated from the main network and will never work. |
+| Still bound to localhost? | Without `--host 0.0.0.0` nothing else matters. |
+| Firewall | Briefly disable Windows Defender Firewall on the *private* profile to test. If that fixes it, add a rule for Python rather than leaving it off. |
+| Right IP? | `ipconfig` lists several adapters. You want the Wi-Fi one, not Ethernet, WSL, VirtualBox or Hyper-V. |
+
 ---
 
 ## Troubleshooting (Windows)
