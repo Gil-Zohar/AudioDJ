@@ -9,3 +9,5 @@ samples/*
 *.egg-info/
 tests/_audio/
 music/
+reference/*
+!reference/README.md

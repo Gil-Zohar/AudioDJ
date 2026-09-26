@@ -147,6 +147,11 @@ class Settings(BaseSettings):
     )
 
     music_dir: Path = Path("./music")
+    #: DJ sets to learn transition style from. Deliberately NOT inside
+    #: music_dir: the library scanner has no duration filter, so a 60-minute
+    #: set left there would be treated as a track and could be mixed into a
+    #: set as though it were one.
+    reference_dir: Path = PROJECT_ROOT / "reference"
     data_dir: Path = PROJECT_ROOT / "data"
     lastfm_api_key: str = ""
     youtube_api_key: str = ""
