@@ -34,10 +34,10 @@ from app.render.engine import (
     get_stretcher,
     latest_start_for_bars,
     load_audio,
-    normalize_peak,
     slice_bars,
     to_stereo,
 )
+from app.render.loudness import master_chain, measure_lufs, normalize_to
 from app.render.timeline import Clip, Timeline
 from app.render.transitions import apply_transition
 
@@ -243,6 +243,19 @@ def build_mix(
             log.append(f"skipped {track.title}: no audio at the chosen section")
             continue
 
+        # Match every track's perceived loudness before it reaches the mix,
+        # which is what a DJ sets with trim before touching the fader. Without
+        # it, tracks mastered at different levels lurch up and down and no
+        # amount of crossfade shaping hides it.
+        if render_config.normalize_segments:
+            before = measure_lufs(audio, sample_rate)
+            audio, applied = normalize_to(audio, sample_rate, render_config.target_lufs)
+            if abs(applied) >= 0.1:
+                log.append(
+                    f"trim {track.title[:40]}: {before:.1f} LUFS {applied:+.1f} dB "
+                    f"-> {render_config.target_lufs:.1f}"
+                )
+
         segment_seconds = audio.shape[-1] / sample_rate
 
         if index == 0:
@@ -252,7 +265,7 @@ def build_mix(
             overlap = min(transition_bars * bar_seconds, segment_seconds * 0.5)
             cursor -= overlap
             name = enabled[index % len(enabled)]
-            outgoing_tail = _tail_of(timeline, cursor, overlap, sample_rate)
+            outgoing_tail = consume_tail(timeline, cursor, overlap, sample_rate)
             incoming_head = audio[..., : int(overlap * sample_rate)]
 
             # Work the outgoing track on its way out, the way a DJ would: pull
@@ -365,7 +378,19 @@ def build_mix(
             log.append("hype layer not built yet (stage 4); skipping")
 
     progress("mixing down", 0.88)
-    audio = normalize_peak(timeline.render(), render_config.headroom_db)
+    audio, master = master_chain(
+        timeline.render(), sample_rate,
+        target_lufs=render_config.target_lufs,
+        ceiling_db=render_config.true_peak_ceiling_db,
+        release_ms=render_config.limiter_release_ms,
+        ride_levels=render_config.ride_levels,
+    )
+    log.append(
+        f"master: {master['input_lufs']} -> {master['output_lufs']} LUFS "
+        f"({master['gain_db']:+.1f} dB), peak {master['peak_db']} dBFS, "
+        f"level ride {master['level_ride_db']:.1f} dB, "
+        f"limiter caught {master['limiter_reduction_db']:.1f} dB"
+    )
 
     progress("encoding", 0.93)
     name = out_name or f"mix_{int(time.time())}"
@@ -408,11 +433,18 @@ def _default_start(analysis: Analysis) -> float:
     return analysis.sections[0].start if analysis.sections else 0.0
 
 
-def _tail_of(timeline: Timeline, start: float, length: float, sample_rate: int) -> np.ndarray:
-    """Render just the window of the timeline that the next track overlaps.
+def consume_tail(timeline: Timeline, start: float, length: float,
+                 sample_rate: int) -> np.ndarray:
+    """Take the window the next track overlaps: render it AND remove it.
 
-    Cheaper and simpler than rendering the whole mix to grab its last few bars,
-    and it means transitions see exactly what will be playing underneath them.
+    Rendering and removing are deliberately one operation. When they were two,
+    they drifted apart: the window was rendered, processed and added back while
+    the original stayed underneath, so every transition played the outgoing
+    track twice. Two correlated copies sum to about +6dB, and measured spikes
+    reached +17dB once delay tails and pads landed on top.
+
+    Cheaper than rendering the whole mix to grab its last few bars, and it means
+    transitions see exactly what will be playing underneath them.
     """
     samples = max(1, int(length * sample_rate))
     canvas = np.zeros((timeline.channels, samples), dtype=np.float32)
@@ -437,4 +469,7 @@ def _tail_of(timeline: Timeline, start: float, length: float, sample_rate: int) 
         if count > 0:
             canvas[:, write_at:write_at + count] += audio[:, take_from:take_from + count]
 
+    # Everything from `start` onward now lives in `canvas`; leaving it on the
+    # timeline as well is what caused the doubling.
+    timeline.truncate_at(start)
     return canvas

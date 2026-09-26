@@ -51,7 +51,16 @@ render:
   max_stretch: 0.12           # drop a track from a set if it needs more than this
   transition_bars: 8
   min_section_bars: 8
-  headroom_db: -1.0
+  # Gain staging by perceived loudness (ITU-R BS.1770), not by peak. Peak
+  # normalisation scales everything by one number, so a quiet track stays quiet
+  # next to a loud one; matching LUFS is what a DJ does with trim.
+  target_lufs: -14.0          # streaming-style. Use about -9 for a club master
+  true_peak_ceiling_db: -1.0  # limiter ceiling
+  limiter_release_ms: 120
+  normalize_segments: true    # match each track's loudness before it enters
+  # Two beat-matched tracks are correlated, so a blend sums in amplitude and
+  # runs hot however the fades are shaped. This rides it back down.
+  ride_levels: true
   mashup_vocal_gain_db: 1.5
   mashup_instrumental_gain_db: -1.5
 

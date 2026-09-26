@@ -67,6 +67,31 @@ class Timeline:
     def mark(self, time: float, kind: str, label: str, **detail) -> None:
         self.events.append(TimelineEvent(time=time, kind=kind, label=label, detail=detail))
 
+    def truncate_at(self, time: float) -> int:
+        """Cut every clip short so nothing plays past `time`.
+
+        Used when a window of the timeline is taken out, processed and put
+        back: without this the original audio stays underneath and the window
+        plays twice. Returns how many clips were shortened.
+        """
+        cut = max(0, int(round(time * self.sample_rate)))
+        trimmed = 0
+
+        for clip in self.clips:
+            if clip.audio is None or clip.audio.size == 0:
+                continue
+            start = int(round(clip.start * self.sample_rate))
+            keep = cut - start
+            if keep >= clip.audio.shape[-1] or keep < 0:
+                continue          # ends before the cut, or starts after it
+            clip.audio = clip.audio[..., :keep]
+            # A fade-out now falls in discarded audio, so drop it rather than
+            # let it fade the wrong samples.
+            clip.fade_out = 0.0
+            trimmed += 1
+
+        return trimmed
+
     @property
     def duration(self) -> float:
         if not self.clips:

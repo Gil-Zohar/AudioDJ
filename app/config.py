@@ -73,7 +73,14 @@ class RenderConfig(BaseModel):
     max_stretch: float = 0.12
     transition_bars: int = 8
     min_section_bars: int = 8
-    headroom_db: float = -1.0
+    # Perceived-loudness gain staging. Peak normalisation alone cannot keep a
+    # set level: it scales by one number, so a quiet track stays quiet beside a
+    # loud one.
+    target_lufs: float = -14.0
+    true_peak_ceiling_db: float = -1.0
+    limiter_release_ms: float = 120.0
+    normalize_segments: bool = True
+    ride_levels: bool = True   # even out short-term loudness across blends
     mashup_vocal_gain_db: float = 1.5
     mashup_instrumental_gain_db: float = -1.5
 

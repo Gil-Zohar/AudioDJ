@@ -23,10 +23,10 @@ from app.render.engine import (
     get_stretcher,
     latest_start_for_bars,
     load_audio,
-    normalize_peak,
     slice_bars,
     to_stereo,
 )
+from app.render.loudness import master_chain
 from app.render.timeline import Clip, Timeline
 from app.render.transitions import apply_transition
 
@@ -222,8 +222,16 @@ def build_mashup(
                       result.description, **result.detail)
         log.append(f"outro treatment: {result.description}")
 
-    audio = timeline.render()
-    audio = normalize_peak(audio, render_config.headroom_db)
+    audio, master = master_chain(
+        timeline.render(), sample_rate,
+        target_lufs=render_config.target_lufs,
+        ceiling_db=render_config.true_peak_ceiling_db,
+        release_ms=render_config.limiter_release_ms,
+    )
+    log.append(
+        f"master: {master['input_lufs']} -> {master['output_lufs']} LUFS, "
+        f"peak {master['peak_db']} dBFS"
+    )
 
     progress("encoding", 0.9)
     name = out_name or f"mashup_{int(time.time())}"

@@ -240,3 +240,72 @@ def test_mashup_writes_a_usable_tracklist(long_fixture_tracks):
     assert tracklist["events"], "the tracklist must carry timestamped events"
     assert all("timecode" in e for e in tracklist["events"])
     assert tracklist["match"]["breakdown"]["reasons"]
+
+
+@pytest.mark.slow
+def test_transitions_do_not_spike_in_loudness(long_fixture_tracks):
+    """The regression this guards is one the user heard before any test did.
+
+    consume_tail renders a window of the timeline and must also remove it. When
+    rendering and removing were separate steps they drifted apart: the
+    processed window was added back on top of the original, so the outgoing
+    track played twice through every transition. Measured spikes ran +10 to
+    +17dB above steady state.
+    """
+    import json
+
+    import soundfile as sf
+
+    from app.render.mix import build_mix
+
+    track_a, track_b = long_fixture_tracks
+    result = build_mix([track_a, track_b], target_minutes=3, blend="classic",
+                       out_name="pytest_levels", hype="off", fx_style="club")
+
+    audio, sample_rate = sf.read(result.files["wav"])
+    mono = audio.mean(axis=1)
+
+    window = sample_rate // 4
+    rms = np.array([
+        np.sqrt(np.mean(mono[i:i + window] ** 2))
+        for i in range(0, len(mono) - window, window)
+    ])
+    times = np.arange(len(rms)) * window / sample_rate
+    steady = float(np.median(rms[rms > 1e-5]))
+    assert steady > 0
+
+    transitions = [e["time"] for e in result.tracklist["events"]
+                   if e["kind"] == "transition"]
+    assert transitions, "a two-track set must contain a transition"
+
+    for at in transitions:
+        mask = (times >= at - 2.0) & (times <= at + 8.0)
+        if not mask.any():
+            continue
+        spike_db = 20 * np.log10(float(rms[mask].max()) / steady)
+        assert spike_db < 6.0, (
+            f"transition at {at:.0f}s is {spike_db:+.1f}dB above steady state; "
+            "the outgoing track is probably being summed with itself"
+        )
+
+
+@pytest.mark.slow
+def test_mix_is_mastered_to_the_configured_target(long_fixture_tracks):
+    """Levels should land on the loudness target, under the peak ceiling."""
+    import soundfile as sf
+
+    from app.config import get_tuning
+    from app.render.loudness import measure_lufs, true_peak_db
+    from app.render.mix import build_mix
+
+    tuning = get_tuning()
+    track_a, track_b = long_fixture_tracks
+    result = build_mix([track_a, track_b], target_minutes=3, blend="classic",
+                       out_name="pytest_master", hype="off", fx_style="clean")
+
+    audio, sample_rate = sf.read(result.files["wav"])
+    audio = audio.T
+
+    assert measure_lufs(audio, sample_rate) == pytest.approx(
+        tuning.render.target_lufs, abs=2.0)
+    assert true_peak_db(audio) <= tuning.render.true_peak_ceiling_db + 0.5
